@@ -1,6 +1,7 @@
 plugins {
-    alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+    id 'org.jetbrains.kotlin.plugin.compose' version '2.0.0'
 }
 
 android {
@@ -17,6 +18,7 @@ android {
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    // Load OpenCV native libs
     sourceSets {
         main {
             jniLibs.srcDirs = ['../OpenCV/native/libs']
@@ -29,42 +31,73 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_11
         targetCompatibility JavaVersion.VERSION_11
     }
+
     kotlinOptions {
         jvmTarget = '11'
-        freeCompilerArgs += ["-opt-in=androidx.compose.material3.ExperimentalMaterial3Api"]
+        freeCompilerArgs += [
+                "-opt-in=androidx.compose.material3.ExperimentalMaterial3Api"
+        ]
     }
+
     externalNativeBuild {
         cmake {
             path file('src/main/cpp/CMakeLists.txt')
             version '3.22.1'
         }
     }
-    composeOptions {
-        kotlinCompilerExtensionVersion '1.5.6' // or latest
-    }
+
     buildFeatures {
-        viewBinding true
         compose true
+        viewBinding true
     }
 }
 
 dependencies {
 
+    // ---------------------------
+    // Android core
+    // ---------------------------
     implementation libs.androidx.core.ktx
     implementation libs.androidx.appcompat
     implementation libs.material
     implementation libs.androidx.constraintlayout
+
+    // ---------------------------
+    // OpenCV module
+    // ---------------------------
     implementation project(':OpenCV')
+
+    // ---------------------------
+    // Compose BOM
+    // ---------------------------
+    implementation platform('androidx.compose:compose-bom:2024.01.00')
+
+    // Compose UI
+    implementation 'androidx.compose.ui:ui'
+    implementation 'androidx.compose.ui:ui-tooling-preview'
+
+    // Material3
+    implementation 'androidx.compose.material3:material3'
+
+    // Required for setContent()
+    implementation "androidx.activity:activity-compose:1.8.2"
+
+    // Coil for async image loading
+    implementation "io.coil-kt:coil-compose:2.4.0"
+
+    // ---------------------------
+    // Testing
+    // ---------------------------
     testImplementation libs.junit
     androidTestImplementation libs.androidx.junit
     androidTestImplementation libs.androidx.espresso.core
-    implementation platform('androidx.compose:compose-bom:2024.01.00')
-    implementation 'androidx.compose.material3:material3'
-    implementation "io.coil-kt:coil-compose:2.4.0"
-    implementation "androidx.activity:activity-compose:1.8.2"
 
+    // Debug Compose tooling
+    debugImplementation 'androidx.compose.ui:ui-tooling'
+    debugImplementation 'androidx.compose.ui:ui-test-manifest'
 }
