@@ -35,6 +35,7 @@ android {
     }
     kotlinOptions {
         jvmTarget = '11'
+        freeCompilerArgs += ["-opt-in=androidx.compose.material3.ExperimentalMaterial3Api"]
     }
     externalNativeBuild {
         cmake {
@@ -42,8 +43,12 @@ android {
             version '3.22.1'
         }
     }
+    composeOptions {
+        kotlinCompilerExtensionVersion '1.5.6' // or latest
+    }
     buildFeatures {
         viewBinding true
+        compose true
     }
 }
 
@@ -57,4 +62,8 @@ dependencies {
     testImplementation libs.junit
     androidTestImplementation libs.androidx.junit
     androidTestImplementation libs.androidx.espresso.core
+    implementation platform('androidx.compose:compose-bom:2024.01.00')
+    implementation 'androidx.compose.material3:material3'
+    implementation "io.coil-kt:coil-compose:2.4.0"
+
 }
