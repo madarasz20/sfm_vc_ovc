@@ -1,0 +1,40 @@
+package com.d2xcp0.sfm_vc_ocv.screens
+
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.Button
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+
+@Composable
+fun MainScreen(
+    onOpenGallery: () -> Unit,
+    onOpenCamera: () -> Unit,
+    onTestImagePaths: () -> Unit   // ← ADDED PARAM
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Button(onClick = onOpenCamera) {
+            Text("Open Camera")
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Button(onClick = onOpenGallery) {
+            Text("Open Gallery")
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Button(onClick = onTestImagePaths) {    // ← FIXED
+            Text("Test Image Paths")
+        }
+    }
+}
