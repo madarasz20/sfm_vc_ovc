@@ -1,4 +1,4 @@
-package com.d2xcp0.sfm_vc.utils
+package com.d2xcp0.sfm_vc_ocv.utils
 
 import android.content.Context
 import java.io.File
