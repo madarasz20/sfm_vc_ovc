@@ -15,7 +15,8 @@ fun MainScreen(
     onTestImagePaths: () -> Unit,
     onRunSfM: () -> Unit,
     onShowSfMResult: () -> Unit,
-    onClearGallery: () -> Unit        // NEW
+    onClearGallery: () -> Unit,
+    onExportPointCloud: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -47,6 +48,12 @@ fun MainScreen(
 
         Button(onClick = onClearGallery) {
             Text("Clear Gallery")       // NEW
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Button(onClick = onExportPointCloud) {
+            Text("Export Point Cloud")
         }
     }
 }

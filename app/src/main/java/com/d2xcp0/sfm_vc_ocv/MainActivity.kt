@@ -27,6 +27,8 @@ import org.opencv.android.OpenCVLoader
 import org.opencv.core.Mat
 import org.opencv.imgcodecs.Imgcodecs
 import org.opencv.core.Size
+import com.d2xcp0.sfm_vc_ocv.sfm.PointCloudExporter
+
 
 class MainActivity : AppCompatActivity() {
 
@@ -77,11 +79,26 @@ class MainActivity : AppCompatActivity() {
                     onTestImagePaths = { testImagePaths() },
                     onRunSfM = { runSfM() },
                     onShowSfMResult = { showSfMResult() },
-                    onClearGallery = { clearGallery() }
+                    onClearGallery = { clearGallery() },
+                    onExportPointCloud = { exportPointCloud() }
                 )
             }
         }
     }
+    private fun exportPointCloud() {
+        if (reconstructedCloud == null) {
+            Toast.makeText(this, "No point cloud to export!", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val file = PointCloudExporter.exportPLY(this, reconstructedCloud!!)
+        if (file != null) {
+            Toast.makeText(this, "Point cloud saved to:\n${file.absolutePath}", Toast.LENGTH_LONG).show()
+        } else {
+            Toast.makeText(this, "Export failed.", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     private fun clearGallery() {
         for (uri in savedImages) {
             try {
