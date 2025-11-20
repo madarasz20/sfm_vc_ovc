@@ -17,29 +17,31 @@ import androidx.core.content.FileProvider
 import androidx.core.app.ActivityCompat
 import com.d2xcp0.sfm_vc_ocv.screens.GalleryScreen
 import com.d2xcp0.sfm_vc_ocv.screens.MainScreen
+import com.d2xcp0.sfm_vc_ocv.sfm.*
 import com.d2xcp0.sfm_vc_ocv.utils.StorageUtils
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
 import android.util.Log
 import org.opencv.android.OpenCVLoader
-import android.widget.TextView
-import com.d2xcp0.sfm_vc_ocv.databinding.ActivityMainBinding
+import org.opencv.core.Mat
+import org.opencv.imgcodecs.Imgcodecs
+import org.opencv.core.Size
 
 class MainActivity : AppCompatActivity() {
 
     private val CAMERA_PERMISSION_CODE = 100
     private var latestPhotoUri: Uri? = null
-    private val savedImages = mutableStateListOf<Uri>() // Compose-friendly list
+    private val savedImages = mutableStateListOf<Uri>()
+
+    // Store the 3D reconstruction results
+    private var reconstructedCloud: List<org.opencv.core.Point3>? = null
 
     companion object {
-        init {
-            System.loadLibrary("native-lib")
-        }
+        init { System.loadLibrary("native-lib") }
     }
 
     external fun nativeTest(): String
-
 
     private val cameraLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -57,9 +59,8 @@ class MainActivity : AppCompatActivity() {
         if (OpenCVLoader.initDebug()) {
             Log.i("OpenCV", "OpenCV loaded successfully!")
         } else {
-            Log.e("OpenCV","OpenCV FAILED!" )
+            Log.e("OpenCV", "OpenCV FAILED!")
         }
-
 
         setContent {
             var showGallery by remember { mutableStateOf(false) }
@@ -72,26 +73,82 @@ class MainActivity : AppCompatActivity() {
             } else {
                 MainScreen(
                     onOpenGallery = { showGallery = true },
-                    onOpenCamera = {
-                        if (checkCameraPermission()) openCamera()
-                        else requestCameraPermission()
-                    },
-                    onTestImagePaths = { testImagePaths() }   // ← ADDED CALLBACK
+                    onOpenCamera = { if (checkCameraPermission()) openCamera() else requestCameraPermission() },
+                    onTestImagePaths = { testImagePaths() },
+                    onRunSfM = { runSfM() },
+                    onShowSfMResult = { showSfMResult() },
+                    onClearGallery = { clearGallery() }
                 )
             }
         }
     }
+    private fun clearGallery() {
+        savedImages.clear()
+        Toast.makeText(this, "Gallery cleared!", Toast.LENGTH_SHORT).show()
+    }
 
-    /** Called by the MainScreen test button */
+    // -----------------------------------------
+    //  Helper: Convert URI to OpenCV Mat
+    // -----------------------------------------
+    private fun uriToMat(uri: Uri): Mat {
+        val input = contentResolver.openInputStream(uri)
+        val bytes = input!!.readBytes()
+        val buf = Mat(1, bytes.size, org.opencv.core.CvType.CV_8U)
+        buf.put(0, 0, bytes)
+        return Imgcodecs.imdecode(buf, Imgcodecs.IMREAD_COLOR)
+    }
+
+    // -----------------------------------------
+    //  SfM pipeline execution
+    // -----------------------------------------
+    private fun runSfM() {
+        if (savedImages.size < 2) {
+            Toast.makeText(this, "Need at least 2 images!", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        // Load first two images
+        val img1 = uriToMat(savedImages[0])
+        val img2 = uriToMat(savedImages[1])
+
+        // Create SfM components
+        val calibrator = CameraCalibrator(Size(9.0, 6.0), 0.024)
+        val K = Mat.eye(3, 3, org.opencv.core.CvType.CV_64F) // Using identity unless you have calibration images
+
+        val extractor = FeatureExtractor()
+        val matcher = FeatureMatcher()
+        val poseEstimator = PoseEstimator(K)
+        val triangulator = Triangulator(K)
+
+        // Extract features
+        val (kp1, desc1) = extractor.compute(img1)
+        val (kp2, desc2) = extractor.compute(img2)
+
+        // Match features
+        val matchSet = matcher.match(desc1, desc2, kp1, kp2)
+
+        // Estimate camera pose
+        val (R, t) = poseEstimator.estimatePose(matchSet)
+
+        // Triangulate to obtain 3D point cloud
+        reconstructedCloud = triangulator.triangulate(matchSet, R, t)
+
+        Toast.makeText(this, "Reconstructed ${reconstructedCloud!!.size} 3D points!", Toast.LENGTH_LONG).show()
+    }
+
+    // -----------------------------------------
+    //  Placeholder for 3D viewer
+    // -----------------------------------------
+    private fun showSfMResult() {
+        Toast.makeText(this, "3D Viewer not implemented yet.", Toast.LENGTH_SHORT).show()
+    }
+
+    // TEST: Calls native function
     private fun testImagePaths() {
         val paths = StorageUtils.getAllImageFilePaths(this)
-        val nativeMsg = nativeTest()  // 🔥 call into C++
-
-        Toast.makeText(
-            this,
-            "Found ${paths.size} images\n$nativeMsg",
-            Toast.LENGTH_LONG
-        ).show()}
+        val nativeMsg = nativeTest()
+        Toast.makeText(this, "Found ${paths.size} images\n$nativeMsg", Toast.LENGTH_LONG).show()
+    }
 
     private fun createImageFile(): File {
         val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())

@@ -13,8 +13,9 @@ fun MainScreen(
     onOpenGallery: () -> Unit,
     onOpenCamera: () -> Unit,
     onTestImagePaths: () -> Unit,
-    onRunSfM: () -> Unit,            // NEW
-    onShowSfMResult: () -> Unit      // NEW (placeholder)
+    onRunSfM: () -> Unit,
+    onShowSfMResult: () -> Unit,
+    onClearGallery: () -> Unit        // NEW
 ) {
     Column(
         modifier = Modifier
@@ -23,32 +24,29 @@ fun MainScreen(
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Button(onClick = onOpenCamera) {
-            Text("Open Camera")
-        }
+
+        Button(onClick = onOpenCamera) { Text("Open Camera") }
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        Button(onClick = onOpenGallery) {
-            Text("Open Gallery")
-        }
+        Button(onClick = onOpenGallery) { Text("Open Gallery") }
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        Button(onClick = onTestImagePaths) {
-            Text("Test Image Paths")
-        }
+        Button(onClick = onTestImagePaths) { Text("Test Image Paths") }
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        Button(onClick = onRunSfM) {
-            Text("Run SfM")
-        }
+        Button(onClick = onRunSfM) { Text("Run SfM") }
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        Button(onClick = onShowSfMResult) {
-            Text("View Reconstruction (Later)")
+        Button(onClick = onShowSfMResult) { Text("View Reconstruction (Later)") }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Button(onClick = onClearGallery) {
+            Text("Clear Gallery")       // NEW
         }
     }
 }
