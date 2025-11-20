@@ -12,7 +12,9 @@ import androidx.compose.ui.unit.dp
 fun MainScreen(
     onOpenGallery: () -> Unit,
     onOpenCamera: () -> Unit,
-    onTestImagePaths: () -> Unit   // ← ADDED PARAM
+    onTestImagePaths: () -> Unit,
+    onRunSfM: () -> Unit,            // NEW
+    onShowSfMResult: () -> Unit      // NEW (placeholder)
 ) {
     Column(
         modifier = Modifier
@@ -33,8 +35,20 @@ fun MainScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        Button(onClick = onTestImagePaths) {    // ← FIXED
+        Button(onClick = onTestImagePaths) {
             Text("Test Image Paths")
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Button(onClick = onRunSfM) {
+            Text("Run SfM")
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Button(onClick = onShowSfMResult) {
+            Text("View Reconstruction (Later)")
         }
     }
 }
