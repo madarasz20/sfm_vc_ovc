@@ -54,7 +54,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        if (OpenCVLoader.initLocal()) {
+        if (OpenCVLoader.initDebug()) {
             Log.i("OpenCV", "OpenCV loaded successfully!")
         } else {
             Log.e("OpenCV","OpenCV FAILED!" )
