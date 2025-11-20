@@ -83,8 +83,23 @@ class MainActivity : AppCompatActivity() {
         }
     }
     private fun clearGallery() {
+        for (uri in savedImages) {
+            try {
+                // Try deleting via content resolver
+                val rows = contentResolver.delete(uri, null, null)
+                if (rows == 0) {
+                    // Fallback: direct file delete
+                    val file = File(uri.path ?: "")
+                    if (file.exists()) file.delete()
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
         savedImages.clear()
-        Toast.makeText(this, "Gallery cleared!", Toast.LENGTH_SHORT).show()
+
+        Toast.makeText(this, "Gallery cleared and files deleted!", Toast.LENGTH_SHORT).show()
     }
 
     // -----------------------------------------
