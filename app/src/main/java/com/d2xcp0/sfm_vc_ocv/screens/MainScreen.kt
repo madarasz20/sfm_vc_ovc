@@ -16,7 +16,8 @@ fun MainScreen(
     onRunSfM: () -> Unit,
     onShowSfMResult: () -> Unit,
     onClearGallery: () -> Unit,
-    onExportPointCloud: () -> Unit
+    onExportPointCloud: () -> Unit,
+    onCalibrate: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -55,5 +56,12 @@ fun MainScreen(
         Button(onClick = onExportPointCloud) {
             Text("Export Point Cloud")
         }
+        Spacer(Modifier.height(16.dp))
+
+        Button(onClick = onCalibrate) {
+            Text("Calibrate Camera")
+        }
+
+
     }
 }
