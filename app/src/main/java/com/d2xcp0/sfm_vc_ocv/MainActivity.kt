@@ -255,7 +255,7 @@ class MainActivity : AppCompatActivity() {
                 // -----------------------------------
                 // 4) Sequential SfM over pairs
                 // -----------------------------------
-                for (i in 0 until imgs.size - 1) {
+                /*for (i in 0 until imgs.size - 1) {
 
                     // Extract ORB features
                     val (kp1, desc1) = extractor.compute(imgs[i])
@@ -303,7 +303,82 @@ class MainActivity : AppCompatActivity() {
 
                     // Add points to global set
                     allPoints.addAll(refinedCloud)
+                }*/
+
+                for (i in 0 until imgs.size - 1) {
+
+                    // --- 1. FEATURE EXTRACTION ---
+                    val (kp1, desc1) = extractor.compute(imgs[i])
+                    val (kp2, desc2) = extractor.compute(imgs[i + 1])
+
+                    // --- 2. MATCHING ---
+                    val matches = matcher.match(desc1, desc2, kp1, kp2)
+                    Log.i("SfM", "Pair $i-${i + 1}: matches = ${matches.size}")
+
+                    if (matches.size < 20) {
+                        Log.w("SfM", "Skipping pair $i-${i + 1}: too few matches")
+                        continue
+                    }
+
+                    // --- 3. RELATIVE POSE ESTIMATION ---
+                    val (Rrel, trel) = poseEstimator.estimatePose(matches)
+
+                    // Previous camera global pose
+                    val Rprev = rotations.last()
+                    val tprev = translations.last()
+
+                    // --- 4. COMPOSE GLOBAL pose for camera i+1 ---
+                    val Rglobal = Mat()
+                    Core.gemm(Rprev, Rrel, 1.0, Mat(), 0.0, Rglobal)
+
+                    val temp = Mat()
+                    Core.gemm(Rprev, trel, 1.0, Mat(), 0.0, temp)
+
+                    val tglobal = Mat()
+                    Core.add(tprev, temp, tglobal)
+
+                    // --- 5. COARSE TRIANGULATION ---
+                    val coarseCloud = triangulator.triangulate(
+                        matches,
+                        Rprev, tprev,
+                        Rglobal, tglobal
+                    )
+                    Log.i("SfM", "Coarse triangulation: ${coarseCloud.size} points")
+
+                    // --- 6. POSE REFINEMENT USING PnP ---
+                    val (_, pts2) = matches.getMatchedPoints()
+
+                    val (refinedCloud, Rref, tref) = poseRefiner.refine(
+                        coarseCloud,
+                        pts2,
+                        Rglobal,
+                        tglobal
+                    )
+                    Log.i("SfM", "Refined cloud: ${refinedCloud.size} points")
+
+                    // --- 7. TRANSLATION SANITY CHECK ---
+                    if (!translationIsValid(tref)) {
+                        Log.w("SfM", "Invalid translation at frame ${i+1} → skipping this frame")
+                        continue
+                    }
+
+                    // --- 8. UPDATE GLOBAL CAMERA POSES ---
+                    rotations.add(Rref)
+                    translations.add(tref)
+
+                    // --- 9. ADD POINTS TO GLOBAL CLOUD ---
+                    allPoints.addAll(refinedCloud)
                 }
+
+
+
+                val bestI = findBestInitialPair(imgs, extractor, matcher)
+                Log.i("SfM", "Best initial pair = $bestI-${bestI+1}")
+
+                // compute features / matches only once:
+                val (kp1, d1) = extractor.compute(imgs[bestI])
+                val (kp2, d2) = extractor.compute(imgs[bestI + 1])
+                val matches = matcher.match(d1, d2, kp1, kp2)
 
                 // -----------------------------------
                 // Final result
@@ -394,4 +469,51 @@ class MainActivity : AppCompatActivity() {
         Imgproc.resize(src, dst, Size(w * scale, h * scale))
         return dst
     }
+
+    private fun findBestInitialPair(
+        imgs: List<Mat>,
+        extractor: FeatureExtractor,
+        matcher: FeatureMatcher
+    ): Int {
+        var bestIndex = 0
+        var bestScore = 0.0
+
+        for (i in 0 until imgs.size - 1) {
+            val (kp1, d1) = extractor.compute(imgs[i])
+            val (kp2, d2) = extractor.compute(imgs[i + 1])
+
+            val matches = matcher.match(d1, d2, kp1, kp2)
+            if (matches.size < 12) continue
+
+            val (pts1, pts2) = matches.getMatchedPoints()
+
+            // average 2D displacement (parallax)
+            var sumDisp = 0.0
+            for (k in pts1.indices) {
+                sumDisp += Math.hypot(pts1[k].x - pts2[k].x, pts1[k].y - pts2[k].y)
+            }
+            val avgDisp = sumDisp / pts1.size
+
+            val score = matches.size * avgDisp
+            if (score > bestScore) {
+                bestScore = score
+                bestIndex = i
+            }
+        }
+        return bestIndex
+    }
+
+    private fun translationIsValid(t: Mat): Boolean {
+        if (t.empty()) return false
+        val tx = t.get(0,0)[0]
+        val ty = t.get(1,0)[0]
+        val tz = t.get(2,0)[0]
+
+        if (tx.isNaN() || ty.isNaN() || tz.isNaN()) return false
+
+        val mag = Math.sqrt(tx*tx + ty*ty + tz*tz)
+        return mag in 0.001..5.0   // tuned for room-sized recon
+    }
+
+
 }

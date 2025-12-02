@@ -99,12 +99,11 @@ class Triangulator(private val K: Mat) {
             cloud.add(Point3(X, Y, Z))
         }
 
-        Log.i(TAG, "Triangulated raw points: ${cloud.size}")
+        // --- Feasible depth filtering (remove extreme near/far points) ---
+        val filtered = filterFeasibleDepth(cloud)
+        Log.i(TAG, "Feasible depth points: ${filtered.size}/${cloud.size}")
 
-        // ---------------------------------------------------------
-        // Normalize point cloud around origin for nicer visualization
-        // ---------------------------------------------------------
-        return normalizePointCloud(cloud)
+        return filtered
     }
 
     private fun normalizePointCloud(points: List<Point3>): List<Point3> {
@@ -139,4 +138,21 @@ class Triangulator(private val K: Mat) {
             Point3(p.x * scale, p.y * scale, p.z * scale)
         }
     }
+    private fun filterFeasibleDepth(points: List<Point3>): List<Point3> {
+        if (points.size < 10) return points
+
+        val dists = points.map {
+            Math.sqrt(it.x*it.x + it.y*it.y + it.z*it.z)
+        }.sorted()
+
+        val n = dists.size
+        val dMin = dists[(0.1 * (n - 1)).toInt()]
+        val dMax = dists[(0.9 * (n - 1)).toInt()]
+
+        return points.filter {
+            val d = Math.sqrt(it.x*it.x + it.y*it.y + it.z*it.z)
+            d in dMin..dMax
+        }
+    }
+
 }
