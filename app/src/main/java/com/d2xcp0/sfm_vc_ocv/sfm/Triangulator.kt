@@ -1,44 +1,142 @@
 package com.d2xcp0.sfm_vc_ocv.sfm
 
+import android.util.Log
 import org.opencv.calib3d.Calib3d
 import org.opencv.core.*
 
 class Triangulator(private val K: Mat) {
 
-    fun triangulate(matches: MatchSet, R: Mat, t: Mat): List<Point3> {
+    companion object {
+        private const val TAG = "Triangulator"
+    }
+
+    fun triangulate(
+        matches: MatchSet,
+        R1: Mat, t1: Mat,
+        R2: Mat, t2: Mat
+    ): List<Point3> {
 
         val (pts1, pts2) = matches.getMatchedPoints()
 
-        // Build P1 = K [I | 0]
-        val P1 = Mat(3, 4, CvType.CV_64F)
-        val I = Mat.eye(3, 3, CvType.CV_64F)
-        val zero = Mat.zeros(3, 1, CvType.CV_64F)
-        val left1 = Mat()
-        Core.hconcat(listOf(I, zero), left1)
-        Core.gemm(K, left1, 1.0, Mat(), 0.0, P1)
+        if (pts1.isEmpty() || pts2.isEmpty() || pts1.size != pts2.size) {
+            Log.w(TAG, "No matched points or size mismatch for triangulation.")
+            return emptyList()
+        }
 
-        // Build P2 = K [R | t]
-        val Rt = Mat()
-        Core.hconcat(listOf(R, t), Rt)
+        // ---------------------------------------------------------
+        // P1 = K [R1 | t1]
+        // P2 = K [R2 | t2]
+        // Ensure double precision and correct shapes:
+        // R: 3x3, t: 3x1, P: 3x4
+        // ---------------------------------------------------------
+        val R1d = Mat()
+        val R2d = Mat()
+        val t1d = Mat()
+        val t2d = Mat()
+        R1.convertTo(R1d, CvType.CV_64F)
+        R2.convertTo(R2d, CvType.CV_64F)
+        t1.convertTo(t1d, CvType.CV_64F)
+        t2.convertTo(t2d, CvType.CV_64F)
+
+        val Rt1 = Mat(3, 4, CvType.CV_64F)
+        val Rt2 = Mat(3, 4, CvType.CV_64F)
+
+        // [R | t] for camera 1
+        for (r in 0 until 3) {
+            for (c in 0 until 3) {
+                Rt1.put(r, c, R1d.get(r, c)[0])
+                Rt2.put(r, c, R2d.get(r, c)[0])
+            }
+            Rt1.put(r, 3, t1d.get(r, 0)[0])
+            Rt2.put(r, 3, t2d.get(r, 0)[0])
+        }
+
+        val P1 = Mat()
         val P2 = Mat()
-        Core.gemm(K, Rt, 1.0, Mat(), 0.0, P2)
+        Core.gemm(K, Rt1, 1.0, Mat(), 0.0, P1)
+        Core.gemm(K, Rt2, 1.0, Mat(), 0.0, P2)
 
-        // Convert matched points to OpenCV format
+        // ---------------------------------------------------------
+        // Convert matched points to MatOfPoint2f
+        // ---------------------------------------------------------
         val mat1 = MatOfPoint2f(*pts1.toTypedArray())
         val mat2 = MatOfPoint2f(*pts2.toTypedArray())
 
-        // Perform triangulation
+        // ---------------------------------------------------------
+        // Triangulate 4D homogeneous output
+        // pts4d: 4 x N matrix, each column = [x, y, z, w]^T
+        // ---------------------------------------------------------
         val pts4d = Mat()
         Calib3d.triangulatePoints(P1, P2, mat1, mat2, pts4d)
 
+        // ---------------------------------------------------------
+        // Convert to Euclidean 3D, filter invalid / behind-camera points
+        // ---------------------------------------------------------
         val cloud = mutableListOf<Point3>()
-        for (i in 0 until pts4d.cols()) {
-            val x = pts4d.get(0, i)[0] / pts4d.get(3, i)[0]
-            val y = pts4d.get(1, i)[0] / pts4d.get(3, i)[0]
-            val z = pts4d.get(2, i)[0] / pts4d.get(3, i)[0]
-            cloud.add(Point3(x, y, z))   // ← FIXED: Point3, not Point3d
+        val n = pts4d.cols()
+
+        for (i in 0 until n) {
+            val x = pts4d.get(0, i)[0]
+            val y = pts4d.get(1, i)[0]
+            val z = pts4d.get(2, i)[0]
+            val w = pts4d.get(3, i)[0]
+
+            if (w == 0.0) continue
+
+            val X = x / w
+            val Y = y / w
+            val Z = z / w
+
+            // basic sanity checks
+            if (!X.isFinite() || !Y.isFinite() || !Z.isFinite()) continue
+
+            // we want points in front of the first camera
+            if (Z <= 0) continue
+
+            // reject crazy far-out points (scale from homography is arbitrary)
+            if (Z > 5000 || Z < -5000) continue
+
+            cloud.add(Point3(X, Y, Z))
         }
 
-        return cloud
+        Log.i(TAG, "Triangulated raw points: ${cloud.size}")
+
+        // ---------------------------------------------------------
+        // Normalize point cloud around origin for nicer visualization
+        // ---------------------------------------------------------
+        return normalizePointCloud(cloud)
+    }
+
+    private fun normalizePointCloud(points: List<Point3>): List<Point3> {
+        if (points.isEmpty()) return points
+
+        var cx = 0.0
+        var cy = 0.0
+        var cz = 0.0
+        for (p in points) {
+            cx += p.x
+            cy += p.y
+            cz += p.z
+        }
+        cx /= points.size
+        cy /= points.size
+        cz /= points.size
+
+        var maxDist = 0.0
+        val centered = points.map { p ->
+            val x = p.x - cx
+            val y = p.y - cy
+            val z = p.z - cz
+            val d = Math.sqrt(x * x + y * y + z * z)
+            if (d > maxDist) maxDist = d
+            Point3(x, y, z)
+        }
+
+        if (maxDist == 0.0) return centered
+
+        val scale = 1.0 / maxDist
+        return centered.map { p ->
+            Point3(p.x * scale, p.y * scale, p.z * scale)
+        }
     }
 }

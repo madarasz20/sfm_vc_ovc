@@ -27,9 +27,13 @@ import org.opencv.android.OpenCVLoader
 import org.opencv.core.Mat
 import org.opencv.imgcodecs.Imgcodecs
 import org.opencv.core.*
+import org.opencv.calib3d.Calib3d
 import org.opencv.imgproc.Imgproc
 import android.graphics.BitmapFactory
 import org.opencv.android.Utils
+import org.opencv.features2d.SIFT
+import kotlin.math.max
+import kotlin.math.min
 
 
 class MainActivity : AppCompatActivity() {
@@ -40,6 +44,10 @@ class MainActivity : AppCompatActivity() {
 
     // Store 3D reconstruction result
     private var reconstructedCloud: List<Point3>? = null
+
+    private var K: Mat? = null
+    private var D: Mat? = null
+
 
     companion object {
         init { System.loadLibrary("native-lib") }
@@ -54,11 +62,22 @@ class MainActivity : AppCompatActivity() {
             latestPhotoUri?.let { savedImages.add(it) }
         }
     }
+    private fun debugPrintCalibration() {
+        val prefs = getSharedPreferences("calib", MODE_PRIVATE)
+
+        val kStr = prefs.getString("K", null)
+        val dStr = prefs.getString("D", null)
+
+        Log.i("CALIB_DEBUG", "K = $kStr")
+        Log.i("CALIB_DEBUG", "D = $dStr")
+    }
+
 
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        //*debugPrintCalibration()*//
         if (OpenCVLoader.initDebug())
             Log.i("OpenCV", "OpenCV loaded successfully!")
         else
@@ -87,6 +106,16 @@ class MainActivity : AppCompatActivity() {
                 )
             }
         }
+
+        val loaded = CalibrationStorage.load(this)
+        if (loaded != null) {
+            K = loaded.first
+            D = loaded.second
+            Log.i("CALIB", "Loaded calibration")
+        } else {
+            Log.w("CALIB", "No calibration file found!")
+        }
+
     }
 
     // ----------------------------------------------------------------------------------------
@@ -115,6 +144,9 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
+
+
+
     // ----------------------------------------------------------------------------------------
     //     SfM POINT CLOUD EXPORT
     // ----------------------------------------------------------------------------------------
@@ -132,8 +164,22 @@ class MainActivity : AppCompatActivity() {
     //     CLEAR GALLERY
     // ----------------------------------------------------------------------------------------
     private fun clearGallery() {
-        savedImages.clear()
-        Toast.makeText(this, "Gallery cleared!", Toast.LENGTH_SHORT).show()
+        // Folder where your app saves photos
+        val dir = getExternalFilesDir("Pictures")
+        if (dir != null && dir.exists()) {
+            dir.listFiles()?.forEach { file ->
+                try {
+                    file.delete()
+                    Log.i("CLEAR", "Deleted: ${file.absolutePath}")
+                } catch (e: Exception) {
+                    Log.e("CLEAR", "Failed to delete ${file.absolutePath}", e)
+                }
+            }
+        }
+
+        savedImages.clear()   // clear UI list
+
+        Toast.makeText(this, "Gallery cleared. All images deleted!", Toast.LENGTH_LONG).show()
     }
 
     // ----------------------------------------------------------------------------------------
@@ -156,28 +202,133 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        val img1 = uriToMat(savedImages[0])
-        val img2 = uriToMat(savedImages[1])
+        Thread {
+            try {
+                // -----------------------------------
+                // 1) Load calibration
+                // -----------------------------------
+                val calibPair = CalibrationStorage.load(this)
+                if (calibPair == null) {
+                    runOnUiThread {
+                        Toast.makeText(this, "No calibration found!", Toast.LENGTH_LONG).show()
+                    }
+                    return@Thread
+                }
+                val K = calibPair.first
+                val D = calibPair.second
 
-        // Load calibrated intrinsics if available
-        val K = Mat.eye(3, 3, CvType.CV_64F)
+                // -----------------------------------
+                // 2) Load, resize, and undistort images
+                // -----------------------------------
+                val rawImgs = savedImages.map { uri -> uriToMat(uri) }
+                val resizedImgs = rawImgs.map { img -> resizeForCalibration(img) }
 
-        val extractor = FeatureExtractor()
-        val matcher = FeatureMatcher()
-        val poseEstimator = PoseEstimator(K)
-        val triangulator = Triangulator(K)
+                val imgs = resizedImgs.map { img ->
+                    val und = Mat()
+                    Calib3d.undistort(img, und, K, D)
+                    und
+                }
 
-        val (kp1, desc1) = extractor.compute(img1)
-        val (kp2, desc2) = extractor.compute(img2)
+                Log.i("SfM", "Loaded ${imgs.size} images for SfM")
 
-        val matches = matcher.match(desc1, desc2, kp1, kp2)
+                // -----------------------------------
+                // 3) Init modules
+                // -----------------------------------
+                val extractor = FeatureExtractor()
+                val matcher = FeatureMatcher()
+                val poseEstimator = PoseEstimator(K)
+                val triangulator = Triangulator(K)
+                val poseRefiner = PoseRefiner(K)
 
-        val (R, t) = poseEstimator.estimatePose(matches)
+                // -----------------------------------
+                // Global pose lists
+                // -----------------------------------
+                val rotations = mutableListOf<Mat>()
+                val translations = mutableListOf<Mat>()
 
-        reconstructedCloud = triangulator.triangulate(matches, R, t)
+                // Camera 0 is world origin
+                rotations.add(Mat.eye(3, 3, CvType.CV_64F))
+                translations.add(Mat.zeros(3, 1, CvType.CV_64F))
 
-        Toast.makeText(this, "Reconstructed ${reconstructedCloud!!.size} points!", Toast.LENGTH_LONG).show()
+                val allPoints = mutableListOf<Point3>()
+
+                // -----------------------------------
+                // 4) Sequential SfM over pairs
+                // -----------------------------------
+                for (i in 0 until imgs.size - 1) {
+
+                    // Extract ORB features
+                    val (kp1, desc1) = extractor.compute(imgs[i])
+                    val (kp2, desc2) = extractor.compute(imgs[i + 1])
+
+                    // Match points
+                    val matches = matcher.match(desc1, desc2, kp1, kp2)
+
+                    if (matches.size < 12) {
+                        Log.w("SfM", "Skipping pair $i-${i + 1}: too few matches")
+                        continue
+                    }
+
+                    // Estimate relative pose from homography
+                    val (Rrel, trel) = poseEstimator.estimatePose(matches)
+
+                    // Compose global pose
+                    val Rprev = rotations.last()
+                    val tprev = translations.last()
+
+                    val Rglobal = Mat()
+                    Core.gemm(Rprev, Rrel, 1.0, Mat(), 0.0, Rglobal)
+
+                    val temp = Mat()
+                    Core.gemm(Rprev, trel, 1.0, Mat(), 0.0, temp)
+                    val tglobal = Mat()
+                    Core.add(tprev, temp, tglobal)
+
+                    // Triangulate 3D points for this pair
+                    val cloud = triangulator.triangulate(
+                        matches,
+                        Rprev, tprev,
+                        Rglobal, tglobal
+                    )
+
+                    Log.i("SfM", "Pair $i produced ${cloud.size} points")
+
+                    // Optional pose refinement (safe version)
+                    val (refinedCloud, Rref, tref) =
+                        poseRefiner.refine(cloud, matches.getMatchedPoints().second, Rglobal, tglobal)
+
+                    // Update global pose
+                    rotations.add(Rref)
+                    translations.add(tref)
+
+                    // Add points to global set
+                    allPoints.addAll(refinedCloud)
+                }
+
+                // -----------------------------------
+                // Final result
+                // -----------------------------------
+                reconstructedCloud = allPoints
+
+                runOnUiThread {
+                    Toast.makeText(
+                        this,
+                        "SfM complete: ${allPoints.size} points reconstructed!",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+
+            } catch (e: Exception) {
+                Log.e("SfM", "SfM failed", e)
+                runOnUiThread {
+                    Toast.makeText(this, "SfM failed: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }.start()
     }
+
+
+
 
     private fun showSfMResult() {
         Toast.makeText(this, "3D Viewer not implemented yet.", Toast.LENGTH_SHORT).show()
@@ -228,5 +379,19 @@ class MainActivity : AppCompatActivity() {
         super.onRequestPermissionsResult(req, p, g)
         if (req == CAMERA_PERMISSION_CODE && g.isNotEmpty() && g[0] == PackageManager.PERMISSION_GRANTED)
             openCamera()
+    }
+
+    private fun resizeForCalibration(src: Mat): Mat {
+        val maxDim = 1200.0
+        val w = src.width().toDouble()
+        val h = src.height().toDouble()
+        val scale = maxDim / max(w, h)
+
+        // If image is already small enough, just return a copy
+        if (scale >= 1.0) return src.clone()
+
+        val dst = Mat()
+        Imgproc.resize(src, dst, Size(w * scale, h * scale))
+        return dst
     }
 }
