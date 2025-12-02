@@ -196,11 +196,13 @@ class MainActivity : AppCompatActivity() {
     // ----------------------------------------------------------------------------------------
     //  SFM pipeline
     // ----------------------------------------------------------------------------------------
-    private fun runSfM() {
+    /*private fun runSfM() {
         if (savedImages.size < 2) {
             Toast.makeText(this, "Need at least 2 images!", Toast.LENGTH_SHORT).show()
             return
         }
+
+
 
         Thread {
             try {
@@ -400,7 +402,194 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }.start()
+    }*/
+
+    private fun runSfM() {
+        if (savedImages.size < 2) {
+            Toast.makeText(this, "Need at least 2 images!", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        Thread {
+            try {
+                // -----------------------------------
+                // 1) Load calibration
+                // -----------------------------------
+                val calibPair = CalibrationStorage.load(this)
+                if (calibPair == null) {
+                    runOnUiThread {
+                        Toast.makeText(this, "No calibration found!", Toast.LENGTH_LONG).show()
+                    }
+                    return@Thread
+                }
+                val K = calibPair.first
+                val D = calibPair.second
+
+                // -----------------------------------
+                // 2) Load, resize, undistort images
+                // -----------------------------------
+                val rawImgs = savedImages.map { uri -> uriToMat(uri) }
+                val resizedImgs = rawImgs.map { img -> resizeForCalibration(img) }
+
+                val imgs = resizedImgs.map { img ->
+                    val und = Mat()
+                    Calib3d.undistort(img, und, K, D)
+                    und
+                }
+
+                Log.i("SfM", "Loaded ${imgs.size} images for SfM")
+
+                // -----------------------------------
+                // 3) Init modules
+                // -----------------------------------
+                val extractor = FeatureExtractor()
+                val matcher = FeatureMatcher()
+                val poseEstimator = PoseEstimator(K)
+                val triangulator = Triangulator(K)
+                val poseRefiner = PoseRefiner(K)
+                val anchorMatcher = AnchorMatcher()
+
+                // -----------------------------------
+                // 4) Choose best initial pair (like init_pair)
+                // -----------------------------------
+                val bestPair = findBestInitialPair(imgs, extractor, matcher)
+                Log.i("SfM", "Best initial pair = $bestPair-${bestPair + 1}")
+
+                // -----------------------------------
+                // 5) Global pose lists
+                // -----------------------------------
+                val rotations = mutableListOf<Mat>()
+                val translations = mutableListOf<Mat>()
+
+                // Camera 0 = world origin
+                rotations.add(Mat.eye(3, 3, CvType.CV_64F))
+                translations.add(Mat.zeros(3, 1, CvType.CV_64F))
+
+                val allPoints = mutableListOf<Point3>()
+
+                // Anchor 3D + descriptors for translation registration
+                var anchorCloud: List<Point3>? = null
+                var anchorDescriptors: Mat? = null
+
+                // -----------------------------------
+                // 6) Sequential SfM over adjacent pairs
+                // -----------------------------------
+                for (i in 0 until imgs.size - 1) {
+
+                    // --- 6.1 FEATURE EXTRACTION ---
+                    val (kp1, desc1) = extractor.compute(imgs[i])
+                    val (kp2, desc2) = extractor.compute(imgs[i + 1])
+
+                    // --- 6.2 MATCHING ---
+                    val matches = matcher.match(desc1, desc2, kp1, kp2)
+                    Log.i("SfM", "Pair $i-${i + 1}: matches = ${matches.size}")
+
+                    if (matches.size < 20) {
+                        Log.w("SfM", "Skipping pair $i-${i + 1}: too few matches")
+                        continue
+                    }
+
+                    // --- 6.3 RELATIVE POSE ESTIMATION ---
+                    val (Rrel, trel) = poseEstimator.estimatePose(matches)
+
+                    val Rprev = rotations.last()
+                    val tprev = translations.last()
+
+                    // --- 6.4 COMPOSE GLOBAL POSE ---
+                    val Rglobal = Mat()
+                    Core.gemm(Rprev, Rrel, 1.0, Mat(), 0.0, Rglobal)
+
+                    val temp = Mat()
+                    Core.gemm(Rprev, trel, 1.0, Mat(), 0.0, temp)
+                    val tglobal = Mat()
+                    Core.add(tprev, temp, tglobal)
+
+                    // --- 6.5 COARSE TRIANGULATION ---
+                    val coarseCloud = triangulator.triangulate(
+                        matches,
+                        Rprev, tprev,
+                        Rglobal, tglobal
+                    )
+                    Log.i("SfM", "Pair $i coarse triangulation: ${coarseCloud.size} points")
+
+                    if (coarseCloud.isEmpty()) {
+                        Log.w("SfM", "No 3D points for pair $i, skipping")
+                        continue
+                    }
+
+                    // --- 6.6 INITIALIZE / UPDATE ANCHOR CLOUD ON BEST PAIR ---
+                    if ((anchorCloud == null || i == bestPair) && coarseCloud.size > 30) {
+                        anchorCloud = coarseCloud
+                        anchorDescriptors = desc1.clone()
+                        Log.i("SfM", "Anchor cloud set at pair $i with ${anchorCloud!!.size} points")
+                    }
+
+                    // --- 6.7 POSE REFINEMENT (PAIR-BASED) ---
+                    val (_, pts2) = matches.getMatchedPoints()
+                    var (refinedCloud, Rref, tref) = poseRefiner.refine(
+                        coarseCloud,
+                        pts2,
+                        Rglobal,
+                        tglobal
+                    )
+
+                    // --- 6.8 ANCHOR-BASED TRANSLATION REGISTRATION (2D–3D) ---
+                    if (anchorCloud != null && anchorDescriptors != null) {
+                        val (anchor3D, anchor2D) =
+                            anchorMatcher.match3DTo2D(anchorCloud!!, anchorDescriptors!!, kp2, desc2)
+
+                        if (anchor3D.size >= 12) {
+                            Log.i("SfM", "Pair $i anchor matches: ${anchor3D.size}")
+
+                            val (refCloudAnchor, RrefAnchor, trefAnchor) =
+                                poseRefiner.refine(anchor3D, anchor2D, Rglobal, tglobal)
+
+                            if (translationIsValid(trefAnchor)) {
+                                Log.i("SfM", "Pair $i: using anchor-based pose refinement")
+                                refinedCloud = refCloudAnchor
+                                Rref = RrefAnchor
+                                tref = trefAnchor
+                            }
+                        }
+                    }
+
+                    // --- 6.9 TRANSLATION SANITY CHECK ---
+                    if (!translationIsValid(tref)) {
+                        Log.w("SfM", "Invalid translation at frame ${i + 1} → skipping this frame")
+                        continue
+                    }
+
+                    // --- 6.10 UPDATE GLOBAL CAMERA POSES ---
+                    rotations.add(Rref)
+                    translations.add(tref)
+
+                    // --- 6.11 ACCUMULATE 3D POINTS ---
+                    allPoints.addAll(refinedCloud)
+                }
+
+                // -----------------------------------
+                // 7) Normalize final cloud for display
+                // -----------------------------------
+                val normalized = normalizePointCloud(allPoints)
+                reconstructedCloud = normalized
+
+                runOnUiThread {
+                    Toast.makeText(
+                        this,
+                        "SfM complete: ${normalized.size} points reconstructed!",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+
+            } catch (e: Exception) {
+                Log.e("SfM", "SfM failed", e)
+                runOnUiThread {
+                    Toast.makeText(this, "SfM failed: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }.start()
     }
+
 
 
 
@@ -513,6 +702,49 @@ class MainActivity : AppCompatActivity() {
 
         val mag = Math.sqrt(tx*tx + ty*ty + tz*tz)
         return mag in 0.001..5.0   // tuned for room-sized recon
+    }
+
+    private fun normalizePointCloud(points: List<Point3>): List<Point3> {
+        if (points.isEmpty()) return points
+
+        // --- 1. Compute centroid ---
+        var cx = 0.0
+        var cy = 0.0
+        var cz = 0.0
+
+        for (p in points) {
+            cx += p.x
+            cy += p.y
+            cz += p.z
+        }
+
+        cx /= points.size
+        cy /= points.size
+        cz /= points.size
+
+        // --- 2. Subtract centroid ---
+        val centered = points.map { p ->
+            Point3(p.x - cx, p.y - cy, p.z - cz)
+        }
+
+        // --- 3. Compute scale (max distance from origin) ---
+        var maxDist = 0.0
+        for (p in centered) {
+            val d = Math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z)
+            if (d > maxDist) maxDist = d
+        }
+
+        // Prevent divide by zero
+        if (maxDist < 1e-9) return centered
+
+        val scale = 1.0 / maxDist
+
+        // --- 4. Scale cloud ---
+        val normalized = centered.map { p ->
+            Point3(p.x * scale, p.y * scale, p.z * scale)
+        }
+
+        return normalized
     }
 
 
