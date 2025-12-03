@@ -17,7 +17,8 @@ fun MainScreen(
     onShowSfMResult: () -> Unit,
     onClearGallery: () -> Unit,
     onExportPointCloud: () -> Unit,
-    onCalibrate: () -> Unit
+    onCalibrate: () -> Unit,
+    onOpenDebug: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -60,6 +61,12 @@ fun MainScreen(
 
         Button(onClick = onCalibrate) {
             Text("Calibrate Camera")
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        Button(onClick = onOpenDebug) {
+            Text("Show Debug Matches")
         }
 
 

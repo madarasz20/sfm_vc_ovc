@@ -20,4 +20,26 @@ object StorageUtils {
             .sortedBy { it.lastModified() }
             .map { it.absolutePath }
     }
+
+    fun loadDebugImages(context: Context): List<File> {
+        val dir = File(context.getExternalFilesDir(null), "debug")
+        if (!dir.exists()) return emptyList()
+
+        return dir.listFiles()
+            ?.filter { it.extension.lowercase() in listOf("jpg", "png") }
+            ?.sortedBy { it.name }
+            ?: emptyList()
+    }
+    fun clearDebugImages(context: Context) {
+        val dir = File(context.getExternalFilesDir(null), "debug")
+        if (!dir.exists()) return
+
+        dir.listFiles()?.forEach { file ->
+            try {
+                file.delete()
+            } catch (_: Exception) {}
+        }
+    }
+
+
 }

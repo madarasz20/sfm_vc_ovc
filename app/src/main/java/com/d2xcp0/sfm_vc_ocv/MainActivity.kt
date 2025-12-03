@@ -30,6 +30,7 @@ import org.opencv.core.*
 import org.opencv.calib3d.Calib3d
 import org.opencv.imgproc.Imgproc
 import android.graphics.BitmapFactory
+import com.d2xcp0.sfm_vc_ocv.screens.DebugGalleryScreen
 import org.opencv.android.Utils
 import org.opencv.features2d.SIFT
 import kotlin.math.max
@@ -77,36 +78,61 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        //*debugPrintCalibration()*//
+        // Load OpenCV
         if (OpenCVLoader.initDebug())
             Log.i("OpenCV", "OpenCV loaded successfully!")
         else
             Log.e("OpenCV", "OpenCV FAILED!")
 
         setContent {
-            var showGallery by remember { mutableStateOf(false) }
 
-            if (showGallery) {
-                GalleryScreen(
-                    onBack = { showGallery = false },
-                    images = savedImages.toList()
-                )
-            } else {
-                MainScreen(
-                    onOpenGallery = { showGallery = true },
-                    onOpenCamera = {
-                        if (checkCameraPermission()) openCamera() else requestCameraPermission()
-                    },
-                    onTestImagePaths = { testImagePaths() },
-                    onRunSfM = { runSfM() },
-                    onShowSfMResult = { showSfMResult() },
-                    onClearGallery = { clearGallery() },
-                    onExportPointCloud = { exportPointCloud() },
-                    onCalibrate = { runCalibration() }
-                )
+            // --- UI State ---
+            var showGallery by remember { mutableStateOf(false) }
+            var showDebug by remember { mutableStateOf(false) }
+
+            when {
+                // --- SHOW DEBUG MATCH IMAGES ---
+                showDebug -> {
+                    var debugFiles by remember { mutableStateOf(StorageUtils.loadDebugImages(this)) }
+
+                    DebugGalleryScreen(
+                        debugFiles = debugFiles,
+                        onBack = { showDebug = false },
+                        onClearDebug = {
+                            StorageUtils.clearDebugImages(this)
+                            debugFiles = StorageUtils.loadDebugImages(this)
+                        }
+                    )
+                }
+
+                // --- SHOW NORMAL GALLERY ---
+                showGallery -> {
+                    GalleryScreen(
+                        onBack = { showGallery = false },
+                        images = savedImages.toList()
+                    )
+                }
+
+                // --- MAIN UI ---
+                else -> {
+                    MainScreen(
+                        onOpenGallery = { showGallery = true },
+                        onOpenDebug = { showDebug = true },
+                        onOpenCamera = {
+                            if (checkCameraPermission()) openCamera() else requestCameraPermission()
+                        },
+                        onTestImagePaths = { testImagePaths() },
+                        onRunSfM = { runSfM() },
+                        onShowSfMResult = { showSfMResult() },
+                        onClearGallery = { clearGallery() },
+                        onExportPointCloud = { exportPointCloud() },
+                        onCalibrate = { runCalibration() }
+                    )
+                }
             }
         }
 
+        // Load saved calibration
         val loaded = CalibrationStorage.load(this)
         if (loaded != null) {
             K = loaded.first
@@ -115,8 +141,8 @@ class MainActivity : AppCompatActivity() {
         } else {
             Log.w("CALIB", "No calibration file found!")
         }
-
     }
+
 
     // ----------------------------------------------------------------------------------------
     //  CAMERA CALIBRATION (THE ONLY VALID VERSION)
@@ -672,6 +698,18 @@ class MainActivity : AppCompatActivity() {
             val (kp2, d2) = extractor.compute(imgs[i + 1])
 
             val matches = matcher.match(d1, d2, kp1, kp2)
+
+            DebugVisualizer.saveMatchesImage(
+                this,
+                imgs[i],
+                imgs[i+1],
+                kp1,
+                kp2,
+                matches.toListOfPairs(),
+                "pair_${i}_${i+1}"
+            )
+
+
             if (matches.size < 12) continue
 
             val (pts1, pts2) = matches.getMatchedPoints()

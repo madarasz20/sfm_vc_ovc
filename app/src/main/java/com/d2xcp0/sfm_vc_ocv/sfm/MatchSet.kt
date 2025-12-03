@@ -29,6 +29,7 @@ class MatchSet(
     }
 
     fun getMatchedPoints(): Pair<List<Point>, List<Point>> {
+
         return pts1 to pts2
     }
 
@@ -38,6 +39,16 @@ class MatchSet(
             MatOfPoint2f(*pts2.toTypedArray())
         )
     }
+
+    fun toListOfPairs(): List<Pair<Point, Point>> {
+        val (a, b) = getMatchedPoints()
+        val out = ArrayList<Pair<Point,Point>>()
+        val n = minOf(a.size, b.size)
+        for (i in 0 until n) out.add(Pair(a[i], b[i]))
+        return out
+    }
+
+
 
     val size: Int get() = pts1.size
 }
