@@ -23,7 +23,7 @@ class PoseEstimator(private val K: Mat) {
         val pts1 = MatOfPoint2f(*pts1List.toTypedArray())
         val pts2 = MatOfPoint2f(*pts2List.toTypedArray())
 
-        // --- 1) Homography with RANSAC ---
+        //homography with ransac
         val mask = Mat()
         val H = Calib3d.findHomography(
             pts1,
@@ -69,7 +69,7 @@ class PoseEstimator(private val K: Mat) {
             return Mat.eye(3,3, CvType.CV_64F) to Mat.zeros(3,1, CvType.CV_64F)
         }
 
-        // --- 3) Cheirality test: choose solution with most points in front of both cameras ---
+        //choose solution with most points in front of both cameras
         var bestIdx = 0
         var bestCount = -1
 
@@ -99,7 +99,7 @@ class PoseEstimator(private val K: Mat) {
         return Rbest to tbest
     }
 
-    // Count how many triangulated points are in front of both cameras
+    // Count triangulated points
     private fun countPointsInFront(
         K: Mat,
         R: Mat,

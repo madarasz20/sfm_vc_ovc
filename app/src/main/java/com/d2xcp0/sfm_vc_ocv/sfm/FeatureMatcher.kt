@@ -11,8 +11,7 @@ class FeatureMatcher {
     companion object {
         private const val TAG = "FeatureMatcher"
     }
-
-    // Perfect matcher for ORB
+    // featurematcher for ORB
     private val matcher = BFMatcher.create(Core.NORM_HAMMING, true)
     // crossCheck = true
 

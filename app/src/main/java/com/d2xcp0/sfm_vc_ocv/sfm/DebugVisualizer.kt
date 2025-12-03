@@ -20,7 +20,7 @@ object DebugVisualizer {
         try {
             val outImg = Mat()
 
-            // Convert matches to DMatch format
+            //Convert matches to DMatch
             val dmatches = ArrayList<DMatch>()
             for ((idx, _) in matches.withIndex()) {
                 dmatches.add(DMatch(idx, idx, 1f))

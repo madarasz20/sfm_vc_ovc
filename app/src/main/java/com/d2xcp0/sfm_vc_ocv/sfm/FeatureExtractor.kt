@@ -7,14 +7,22 @@ import org.opencv.features2d.ORB
 
 class FeatureExtractor {
 
-    // ORB is perfect for mobile SfM
     private val detector = ORB.create(
-        2000 // number of features
+        //3000 //number of features
+        2500,   // nfeatures
+        1.2f,   // scaleFactor
+        8,      // nlevels
+        31,     // edgeThreshold
+        0,      // firstLevel
+        2,      // WTA_K
+        ORB.HARRIS_SCORE,
+        31,     // patchSize
+        20      // fastThreshold
     )
 
     fun compute(image: Mat): Pair<MatOfKeyPoint, Mat> {
 
-        // Convert to grayscale (ORB requires single-channel)
+        //Convert to grayscale for orb
         val gray = Mat()
         Imgproc.cvtColor(image, gray, Imgproc.COLOR_BGR2GRAY)
 
@@ -23,7 +31,7 @@ class FeatureExtractor {
 
         detector.detectAndCompute(
             gray,
-            Mat(),      // no mask
+            Mat(),
             keypoints,
             descriptors
         )

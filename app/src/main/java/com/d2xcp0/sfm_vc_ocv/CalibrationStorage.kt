@@ -54,19 +54,19 @@ object CalibrationStorage {
         val cols = json.getInt("cols")
         val type = json.getInt("type")
 
-        // Parse comma-separated doubles
+        //parsing comma separated doubles
         val dataStr = json.getString("data")
         val tokens = dataStr.split(",")
 
-        // Allocate primitive DoubleArray
+        //allocate DoubleArray
         val values = DoubleArray(tokens.size)
         for (i in tokens.indices) {
             values[i] = tokens[i].toDouble()
         }
 
-        // Rebuild the matrix
+        //Rebuilding matrix
         val m = Mat(rows, cols, type)
-        m.put(0, 0, *values)   // <-- IMPORTANT: vararg spread operator
+        m.put(0, 0, *values)
         return m
     }
 

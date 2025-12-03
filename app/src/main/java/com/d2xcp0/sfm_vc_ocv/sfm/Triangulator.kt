@@ -23,12 +23,12 @@ class Triangulator(private val K: Mat) {
             return emptyList()
         }
 
-        // ---------------------------------------------------------
+
         // P1 = K [R1 | t1]
         // P2 = K [R2 | t2]
         // Ensure double precision and correct shapes:
         // R: 3x3, t: 3x1, P: 3x4
-        // ---------------------------------------------------------
+
         val R1d = Mat()
         val R2d = Mat()
         val t1d = Mat()
@@ -56,22 +56,19 @@ class Triangulator(private val K: Mat) {
         Core.gemm(K, Rt1, 1.0, Mat(), 0.0, P1)
         Core.gemm(K, Rt2, 1.0, Mat(), 0.0, P2)
 
-        // ---------------------------------------------------------
-        // Convert matched points to MatOfPoint2f
-        // ---------------------------------------------------------
+
+        //Convert matched points
         val mat1 = MatOfPoint2f(*pts1.toTypedArray())
         val mat2 = MatOfPoint2f(*pts2.toTypedArray())
 
-        // ---------------------------------------------------------
+
         // Triangulate 4D homogeneous output
         // pts4d: 4 x N matrix, each column = [x, y, z, w]^T
-        // ---------------------------------------------------------
+
         val pts4d = Mat()
         Calib3d.triangulatePoints(P1, P2, mat1, mat2, pts4d)
 
-        // ---------------------------------------------------------
-        // Convert to Euclidean 3D, filter invalid / behind-camera points
-        // ---------------------------------------------------------
+        // Convert to euclidean 3D, filter invalid / behind-camera points
         val cloud = mutableListOf<Point3>()
         val n = pts4d.cols()
 
@@ -87,19 +84,18 @@ class Triangulator(private val K: Mat) {
             val Y = y / w
             val Z = z / w
 
-            // basic sanity checks
+            //sanity checks
             if (!X.isFinite() || !Y.isFinite() || !Z.isFinite()) continue
 
-            // we want points in front of the first camera
             if (Z <= 0) continue
 
-            // reject crazy far-out points (scale from homography is arbitrary)
+            //reject crazy far-out points
             if (Z > 5000 || Z < -5000) continue
 
             cloud.add(Point3(X, Y, Z))
         }
 
-        // --- Feasible depth filtering (remove extreme near/far points) ---
+        //feasible depth filtering to remove farout points
         val filtered = filterFeasibleDepth(cloud)
         Log.i(TAG, "Feasible depth points: ${filtered.size}/${cloud.size}")
 

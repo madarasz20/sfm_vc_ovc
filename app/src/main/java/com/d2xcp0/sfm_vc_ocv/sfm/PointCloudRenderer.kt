@@ -12,7 +12,7 @@ import javax.microedition.khronos.opengles.GL10
 
 class PointCloudRenderer : GLSurfaceView.Renderer {
 
-    // Camera rotation (in degrees), controlled by touch
+    // Camera rotation controlled by touch
     var angleX = 20f
     var angleY = -30f
 
@@ -29,7 +29,6 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         GLES20.glClearColor(0.02f, 0.02f, 0.05f, 1.0f)
         GLES20.glEnable(GLES20.GL_DEPTH_TEST)
-        //GLES20.glEnable(GLES20.GL_PROGRAM_POINT_SIZE)
 
         val vertexShaderCode = """
             uniform mat4 uMVPMatrix;
@@ -56,7 +55,7 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
             GLES20.glLinkProgram(it)
         }
 
-        // Build the vertex buffer from the current point cloud
+        //vertex buffer from the current point cloud
         updatePointCloud(PointCloudHolder.points)
     }
 
@@ -74,7 +73,6 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
 
         GLES20.glUseProgram(program)
 
-        // Camera view: positioned back on Z axis, looking at origin
         Matrix.setLookAtM(
             viewMatrix, 0,
             0f, 0f, 3.5f,      // eye
@@ -84,7 +82,7 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
 
         Matrix.setIdentityM(modelMatrix, 0)
 
-        // Apply user-controlled rotations
+        //user-controlled rotations
         Matrix.rotateM(modelMatrix, 0, angleX, 1f, 0f, 0f)
         Matrix.rotateM(modelMatrix, 0, angleY, 0f, 1f, 0f)
 
@@ -137,6 +135,7 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
     private fun loadShader(type: Int, code: String): Int {
         return GLES20.glCreateShader(type).also { shader ->
             GLES20.glShaderSource(shader, code)
+
             GLES20.glCompileShader(shader)
         }
     }

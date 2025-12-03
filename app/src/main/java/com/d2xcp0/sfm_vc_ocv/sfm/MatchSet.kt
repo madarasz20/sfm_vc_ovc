@@ -9,7 +9,6 @@ class MatchSet(
     keypoints2: MatOfKeyPoint
 ) {
 
-    // Convert once, not every time addMatch() is called
     private val kp1Array = keypoints1.toArray()
     private val kp2Array = keypoints2.toArray()
 
