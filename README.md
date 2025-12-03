@@ -3,7 +3,7 @@ Mobile 3D Reconstruction App (Structure-from-Motion)
   This project is a mobile Structure-from-Motion (SfM) pipeline implemented for Android using OpenCV.
   The goal is to allow a user to capture a sequence of photos on their phone and generate a 3D point cloud locally on the device without any server-side computation.
 
-OBJETIVE
+OBJECTIVE
 
   The original goal of the project was to reconstruct indoor room geometry from photos.
   During experimentation it became clear that classical SfM pipelines struggle in indoor conditions on mobile hardware (low texture, motion blur, parallax issues, lighting instability).
