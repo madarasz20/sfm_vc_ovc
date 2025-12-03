@@ -13,11 +13,11 @@ class CameraCalibrator(private val context: Context) {
 
     private val TAG = "CALIB"
 
-    // Board: 9x6 INNER corners (your chessboard)
+    //board images 9*6 inner corners  at /sfm_vc_ocv/app/src/main/assets/calibration
     private val boardSize = Size(9.0, 6.0)
     private val squareSize = 28.0 // mm or any unit (TODO: confirm 28mm)
 
-    // Load images from assets/calibration/
+    //Load images
     fun loadCalibrationImages(): List<Mat> {
         val mats = mutableListOf<Mat>()
         val assetManager = context.assets
@@ -35,7 +35,7 @@ class CameraCalibrator(private val context: Context) {
 
                 Imgproc.cvtColor(mat, mat, Imgproc.COLOR_RGBA2GRAY)
 
-                // 🔥 DOWNSCALE LARGE IMAGES (CRUCIAL)
+                //downscale large images
                 val maxDim = 1600.0
                 val scale = maxDim / max(mat.width().toDouble(), mat.height().toDouble())
 
@@ -59,7 +59,6 @@ class CameraCalibrator(private val context: Context) {
         return mats
     }
 
-    // Perform calibration
     fun calibrate(images: List<Mat>): Boolean {
 
         if (images.isEmpty()) {
@@ -70,7 +69,7 @@ class CameraCalibrator(private val context: Context) {
         val objectPoints = mutableListOf<Mat>()
         val imagePoints = mutableListOf<Mat>()
 
-        // Prepare 3D chessboard coordinates
+        //prep chessboard coordinates
         val objList = ArrayList<Point3>()
         for (y in 0 until boardSize.height.toInt()) {
             for (x in 0 until boardSize.width.toInt()) {

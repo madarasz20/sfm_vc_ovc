@@ -48,26 +48,19 @@ fun MainScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        Button(onClick = onClearGallery) {
-            Text("Clear Gallery")       // NEW
-        }
+        Button(onClick = onClearGallery) { Text("Clear Gallery") }
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        Button(onClick = onExportPointCloud) {
-            Text("Export Point Cloud")
-        }
-        Spacer(Modifier.height(16.dp))
-
-        Button(onClick = onCalibrate) {
-            Text("Calibrate Camera")
-        }
+        Button(onClick = onExportPointCloud) { Text("Export Point Cloud") }
 
         Spacer(Modifier.height(16.dp))
 
-        Button(onClick = onOpenDebug) {
-            Text("Show Debug Matches")
-        }
+        Button(onClick = onCalibrate) { Text("Calibrate Camera") }
+
+        Spacer(Modifier.height(16.dp))
+
+        Button(onClick = onOpenDebug) { Text("Show Debug Matches") }
 
 
     }

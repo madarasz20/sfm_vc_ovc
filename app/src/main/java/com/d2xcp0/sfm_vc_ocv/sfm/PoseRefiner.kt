@@ -21,13 +21,13 @@ class PoseRefiner(private val K: Mat) {
         t: Mat
     ): Triple<List<Point3>, Mat, Mat> {
 
-        // ------------ 1. Quick validity checks ------------
+        //validate
         if (pts3d.size < 6 || pts2d.size < 6) {
             Log.i(TAG, "Not enough points for refinement (${pts3d.size}), skipping.")
             return Triple(pts3d, R, t)
         }
 
-        // Must match counts
+        //match counts
         val n = minOf(pts3d.size, pts2d.size)
         if (n < 6) {
             Log.i(TAG, "Not enough matched pairs ($n), skipping refine.")
@@ -42,22 +42,21 @@ class PoseRefiner(private val K: Mat) {
         val objPoints = MatOfPoint3f(*used3D.toTypedArray())
         val imgPoints = MatOfPoint2f(*used2D.toTypedArray())
 
-        // Extra safety
         if (objPoints.rows() < 6 || imgPoints.rows() < 6) {
             Log.i(TAG, "Too few valid rows after conversion, skipping refine.")
             return Triple(pts3d, R, t)
         }
 
-        // ------------ 2. Setup initial pose ------------
+        //setup initial pose
         val rvec = Mat()
-        Calib3d.Rodrigues(R, rvec)  // rotation → rvec
+        Calib3d.Rodrigues(R, rvec)  //rotation -> rvec
 
         val tvec = t.clone()
 
-        // Zero distortion to keep it simple (and safe)
+        //Zero distortion
         val dist = MatOfDouble(0.0, 0.0, 0.0, 0.0)
 
-        // ------------ 3. Try solvePnP ------------
+        //try PnP
         val success = try {
             Calib3d.solvePnP(
                 objPoints,
@@ -74,13 +73,12 @@ class PoseRefiner(private val K: Mat) {
             false
         }
 
-        // If solvePnP was unstable, keep original pose
         if (!success) {
             Log.i(TAG, "PnP failed or unstable → keeping original pose.")
             return Triple(pts3d, R, t)
         }
 
-        // ------------ 4. Convert refined rvec → Rmat ------------
+        //Convert refined rvec to Rmat
         val Rref = Mat()
         try {
             Calib3d.Rodrigues(rvec, Rref)
@@ -91,7 +89,7 @@ class PoseRefiner(private val K: Mat) {
 
         Log.i(TAG, "Pose refined successfully using ${objPoints.rows()} correspondences.")
 
-        // Return updated R,t but keep original 3D points (triangulation can run again)
+        //return the updated R,t but keep original 3D points for triangulation
         return Triple(pts3d, Rref, tvec)
     }
 }

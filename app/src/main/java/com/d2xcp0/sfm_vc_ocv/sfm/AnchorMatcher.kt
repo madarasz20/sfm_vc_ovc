@@ -20,12 +20,11 @@ class AnchorMatcher {
         descriptors: Mat
     ): Pair<List<Point3>, List<Point>> {
 
-        // --- SAFE ZERO CHECK ---
+        // zero check
         if (anchor3D.isEmpty() || anchorDesc.empty() || descriptors.empty()) {
             return Pair(emptyList(), emptyList())
         }
 
-        // FLANN requires CV_32F
         val d1 = Mat()
         val d2 = Mat()
         anchorDesc.convertTo(d1, CvType.CV_32F)
@@ -42,7 +41,7 @@ class AnchorMatcher {
         val out3D = ArrayList<Point3>()
         val out2D = ArrayList<Point>()
 
-        // SAFETY LIMITS
+        //limits
         val max3D = anchor3D.size
         val maxKP = kp2.size
         val maxDesc1 = d1.rows()
@@ -55,13 +54,13 @@ class AnchorMatcher {
             val best = arr[0]
             val second = arr[1]
 
-            // Lowe ratio test
+            //Lowe ratio test
             if (best.distance >= 0.7f * second.distance) continue
 
-            val q = best.queryIdx   // index into anchorDesc and anchor3D
-            val t = best.trainIdx   // index into descriptors and kp2
+            val q = best.queryIdx   //index into anchorDesc and anchor3D
+            val t = best.trainIdx   //index into descriptors and kp2
 
-            // --- FULL SAFETY CHECKS ---
+            //full check
             if (q !in 0 until max3D) continue
             if (q !in 0 until maxDesc1) continue
             if (t !in 0 until maxKP) continue
