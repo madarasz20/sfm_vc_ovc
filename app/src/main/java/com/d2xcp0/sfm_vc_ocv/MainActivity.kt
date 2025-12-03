@@ -598,6 +598,7 @@ class MainActivity : AppCompatActivity() {
                 // -----------------------------------
                 val normalized = normalizePointCloud(allPoints)
                 reconstructedCloud = normalized
+                PointCloudHolder.points = normalized
 
                 runOnUiThread {
                     Toast.makeText(
@@ -621,7 +622,14 @@ class MainActivity : AppCompatActivity() {
 
 
     private fun showSfMResult() {
-        Toast.makeText(this, "3D Viewer not implemented yet.", Toast.LENGTH_SHORT).show()
+        val cloud = reconstructedCloud
+        if (cloud == null || cloud.isEmpty()) {
+            Toast.makeText(this, "No point cloud to display.", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        PointCloudHolder.points = cloud   // make sure viewer sees latest cloud
+        startActivity(Intent(this, PointCloudActivity::class.java))
     }
 
     // ----------------------------------------------------------------------------------------
