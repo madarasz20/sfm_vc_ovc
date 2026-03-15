@@ -23,6 +23,21 @@ class Triangulator(private val K: Mat) {
             return emptyList()
         }
 
+        if (R1.empty() || R2.empty() || t1.empty() || t2.empty()) {
+            Log.e(TAG, "Empty pose matrix")
+            return emptyList()
+        }
+
+        if (R1.rows() != 3 || R1.cols() != 3 || R2.rows() != 3 || R2.cols() != 3) {
+            Log.e(TAG, "Rotation matrices must be 3x3")
+            return emptyList()
+        }
+
+        if (t1.rows() != 3 || t1.cols() != 1 || t2.rows() != 3 || t2.cols() != 1) {
+            Log.e(TAG, "Translation vectors must be 3x1, got t1=${t1.rows()}x${t1.cols()} t2=${t2.rows()}x${t2.cols()}")
+            return emptyList()
+        }
+
 
         // P1 = K [R1 | t1]
         // P2 = K [R2 | t2]
@@ -44,11 +59,15 @@ class Triangulator(private val K: Mat) {
         // [R | t] for camera 1
         for (r in 0 until 3) {
             for (c in 0 until 3) {
-                Rt1.put(r, c, R1d.get(r, c)[0])
-                Rt2.put(r, c, R2d.get(r, c)[0])
+                val rv1 = getMatValue(R1d, r, c) ?: return emptyList()
+                val rv2 = getMatValue(R2d, r, c) ?: return emptyList()
+                Rt1.put(r, c, rv1)
+                Rt2.put(r, c, rv2)
             }
-            Rt1.put(r, 3, t1d.get(r, 0)[0])
-            Rt2.put(r, 3, t2d.get(r, 0)[0])
+            val tv1 = getMatValue(t1d, r, 0) ?: return emptyList()
+            val tv2 = getMatValue(t2d, r, 0) ?: return emptyList()
+            Rt1.put(r, 3, tv1)
+            Rt2.put(r, 3, tv2)
         }
 
         val P1 = Mat()
@@ -68,15 +87,20 @@ class Triangulator(private val K: Mat) {
         val pts4d = Mat()
         Calib3d.triangulatePoints(P1, P2, mat1, mat2, pts4d)
 
+        if (pts4d.empty() || pts4d.rows() != 4 || pts4d.cols() == 0) {
+            Log.e(TAG, "triangulatePoints failed: pts4d size=${pts4d.rows()}x${pts4d.cols()}")
+            return emptyList()
+        }
+
         // Convert to euclidean 3D, filter invalid / behind-camera points
         val cloud = mutableListOf<Point3>()
         val n = pts4d.cols()
 
         for (i in 0 until n) {
-            val x = pts4d.get(0, i)[0]
-            val y = pts4d.get(1, i)[0]
-            val z = pts4d.get(2, i)[0]
-            val w = pts4d.get(3, i)[0]
+            val x = getMatValue(pts4d, 0, i) ?: continue
+            val y = getMatValue(pts4d, 1, i) ?: continue
+            val z = getMatValue(pts4d, 2, i) ?: continue
+            val w = getMatValue(pts4d, 3, i) ?: continue
 
             if (w == 0.0) continue
 
@@ -149,6 +173,16 @@ class Triangulator(private val K: Mat) {
             val d = Math.sqrt(it.x*it.x + it.y*it.y + it.z*it.z)
             d in dMin..dMax
         }
+    }
+
+    private fun getMatValue(mat: Mat, row: Int, col: Int): Double? {
+        if (mat.empty()) return null
+        if (row < 0 || row >= mat.rows() || col < 0 || col >= mat.cols()) return null
+
+        val v = mat.get(row, col) ?: return null
+        if (v.isEmpty()) return null
+
+        return v[0]
     }
 
 }

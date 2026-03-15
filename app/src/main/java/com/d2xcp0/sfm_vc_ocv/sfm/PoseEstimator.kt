@@ -11,7 +11,7 @@ class PoseEstimator(private val K: Mat) {
         private const val MIN_INLIERS = 12
     }
 
-    fun estimatePose(matchSet: MatchSet): Pair<Mat, Mat> {
+    /*fun estimatePose(matchSet: MatchSet): Pair<Mat, Mat> {
 
         val (pts1List, pts2List) = matchSet.getMatchedPoints()
 
@@ -97,6 +97,76 @@ class PoseEstimator(private val K: Mat) {
         Log.i(TAG, "Selected solution $bestIdx with $bestCount in-front points")
 
         return Rbest to tbest
+    }*/
+
+    fun estimatePose(matchSet: MatchSet): Pair<Mat, Mat> {
+
+        val (pts1List, pts2List) = matchSet.getMatchedPoints()
+
+        if (pts1List.size < MIN_INLIERS) {
+            Log.w(TAG, "Not enough matches for essential matrix")
+            return Mat.eye(3, 3, CvType.CV_64F) to Mat.zeros(3, 1, CvType.CV_64F)
+        }
+
+        val pts1 = MatOfPoint2f(*pts1List.toTypedArray())
+        val pts2 = MatOfPoint2f(*pts2List.toTypedArray())
+
+        val E = Calib3d.findEssentialMat(
+            pts1,
+            pts2,
+            K,
+            Calib3d.RANSAC,
+            0.999,
+            1.0,
+            1000
+        )
+
+        if (E.empty()) {
+            Log.e(TAG, "Essential matrix estimation failed")
+            return Mat.eye(3, 3, CvType.CV_64F) to Mat.zeros(3, 1, CvType.CV_64F)
+        }
+
+        val R = Mat()
+        val t = Mat()
+        val poseMask = Mat()
+
+        val recovered = Calib3d.recoverPose(
+            E,
+            pts1,
+            pts2,
+            K,
+            R,
+            t,
+            poseMask
+        )
+
+        if (recovered < MIN_INLIERS) {
+            Log.w(TAG, "recoverPose found too few valid inliers: $recovered")
+            return Mat.eye(3, 3, CvType.CV_64F) to Mat.zeros(3, 1, CvType.CV_64F)
+        }
+
+        val final1 = ArrayList<Point>()
+        val final2 = ArrayList<Point>()
+
+        val nMask = minOf(pts1List.size, pts2List.size, poseMask.rows())
+        for (i in 0 until nMask) {
+            val mv = poseMask.get(i, 0)
+            if (mv != null && mv.isNotEmpty() && mv[0] != 0.0) {
+                final1.add(pts1List[i])
+                final2.add(pts2List[i])
+            }
+        }
+
+        if (final1.size < MIN_INLIERS) {
+            Log.w(TAG, "Too few pose-consistent inliers after recoverPose")
+            return Mat.eye(3, 3, CvType.CV_64F) to Mat.zeros(3, 1, CvType.CV_64F)
+        }
+
+        matchSet.replaceMatches(final1, final2)
+
+        Log.i(TAG, "Pose estimated. Initial matches=${pts1List.size}, pose inliers=${final1.size}")
+
+        return R to t
     }
 
     // Count triangulated points
