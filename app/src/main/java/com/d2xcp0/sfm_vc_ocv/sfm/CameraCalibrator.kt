@@ -8,6 +8,7 @@ import org.opencv.imgproc.Imgproc
 import org.opencv.android.Utils
 import android.graphics.BitmapFactory
 import kotlin.math.max
+import android.graphics.Bitmap
 
 class CameraCalibrator(private val context: Context) {
 
@@ -19,6 +20,7 @@ class CameraCalibrator(private val context: Context) {
 
     //Load images
     fun loadCalibrationImages(): List<Mat> {
+
         val mats = mutableListOf<Mat>()
         val assetManager = context.assets
         val files = assetManager.list("calibration") ?: emptyArray()
@@ -26,33 +28,44 @@ class CameraCalibrator(private val context: Context) {
         Log.i(TAG, "Found ${files.size} calibration images")
 
         for (file in files) {
+
+            var bitmap: Bitmap? = null
+
             try {
-                val input = assetManager.open("calibration/$file")
-                val bitmap = BitmapFactory.decodeStream(input)
 
-                val mat = Mat()
-                Utils.bitmapToMat(bitmap, mat) // RGBA
+                assetManager.open("calibration/$file").use { input ->
 
-                Imgproc.cvtColor(mat, mat, Imgproc.COLOR_RGBA2GRAY)
+                    val options = BitmapFactory.Options().apply {
+                        inPreferredConfig = Bitmap.Config.RGB_565
+                    }
 
-                //downscale large images
-                val maxDim = 1600.0
-                val scale = maxDim / max(mat.width().toDouble(), mat.height().toDouble())
-
-                if (scale < 1.0) {
-                    Imgproc.resize(
-                        mat,
-                        mat,
-                        Size(mat.width() * scale, mat.height() * scale)
-                    )
-                    Log.i(TAG, "Downscaled $file → ${mat.width()}x${mat.height()}")
+                    bitmap = BitmapFactory.decodeStream(input, null, options)
                 }
 
-                mats.add(mat)
-                Log.i(TAG, "Loaded $file")
+                if (bitmap == null) {
+                    Log.e(TAG, "Failed decoding bitmap $file")
+                    continue
+                }
+
+                // Convert bitmap -> Mat
+                val rgba = Mat()
+                Utils.bitmapToMat(bitmap, rgba)
+
+                // Convert to grayscale
+                val gray = Mat()
+                Imgproc.cvtColor(rgba, gray, Imgproc.COLOR_RGBA2GRAY)
+
+                rgba.release()
+                bitmap.recycle()
+
+                mats.add(gray)
+
+                Log.i(TAG, "Loaded $file → ${gray.width()}x${gray.height()}")
 
             } catch (e: Exception) {
-                Log.e(TAG, "Failed loading $file : ${e.message}")
+
+                Log.e(TAG, "Failed loading $file : ${e.message}", e)
+
             }
         }
 
@@ -86,12 +99,13 @@ class CameraCalibrator(private val context: Context) {
             Log.i(TAG, "Detecting corners in image $index...")
 
             val corners = MatOfPoint2f()
-            val found = Calib3d.findChessboardCorners(
+            /*val found = Calib3d.findChessboardCorners(
                 img,
                 boardSize,
                 corners,
                 Calib3d.CALIB_CB_ADAPTIVE_THRESH + Calib3d.CALIB_CB_NORMALIZE_IMAGE
-            )
+            )*/
+            val found = Calib3d.findChessboardCornersSB(img, boardSize, corners)
 
             if (found) {
                 foundCount++
@@ -101,10 +115,10 @@ class CameraCalibrator(private val context: Context) {
                     corners,
                     Size(11.0, 11.0),
                     Size(-1.0, -1.0),
-                    TermCriteria(TermCriteria.EPS + TermCriteria.MAX_ITER, 30, 0.1)
+                    TermCriteria(TermCriteria.EPS + TermCriteria.MAX_ITER, 30, 0.01)
                 )
 
-                objectPoints.add(objMat)
+                objectPoints.add(objMat.clone())
                 imagePoints.add(corners)
 
                 Log.i(TAG, "✔ Corners FOUND in image $index")

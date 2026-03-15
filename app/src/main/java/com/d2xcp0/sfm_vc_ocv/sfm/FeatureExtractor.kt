@@ -9,15 +9,15 @@ class FeatureExtractor {
 
     private val detector = ORB.create(
         //3000 //number of features
-        2500,   // nfeatures
+        4000,   // nfeatures
         1.2f,   // scaleFactor
         8,      // nlevels
-        31,     // edgeThreshold
+        50,     // edgeThreshold "how much to ignore the sides of the image" (focus on the center part) pixelben
         0,      // firstLevel
         2,      // WTA_K
         ORB.HARRIS_SCORE,
-        31,     // patchSize
-        20      // fastThreshold
+        50,     // patchSize
+        100      // fastThreshold    strongpoint detection (a lényegesebb pontokat pl sarok ilyenek)
     )
 
     fun compute(image: Mat): Pair<MatOfKeyPoint, Mat> {
