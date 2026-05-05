@@ -53,8 +53,8 @@ class FeatureMatcher {
 
                 val best = matches[0]
                 val second = matches[1]
-
-                if (best.distance < 0.75f * second.distance) {
+                    //TODO 0.7-el is nezd meg
+                if (best.distance < 0.70f * second.distance) {
                     goodMatches.add(best)
                 }
             }

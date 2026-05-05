@@ -158,7 +158,7 @@ class Triangulator(private val K: Mat) {
             Point3(p.x * scale, p.y * scale, p.z * scale)
         }
     }
-    private fun filterFeasibleDepth(points: List<Point3>): List<Point3> {
+    /*private fun filterFeasibleDepth(points: List<Point3>): List<Point3> {
         if (points.size < 10) return points
 
         val dists = points.map {
@@ -173,6 +173,23 @@ class Triangulator(private val K: Mat) {
             val d = Math.sqrt(it.x*it.x + it.y*it.y + it.z*it.z)
             d in dMin..dMax
         }
+    }*/
+
+    private fun filterFeasibleDepth(points: List<Point3>): List<Point3> {
+        if (points.size < 10) return points
+
+        // Use Z depth, not distance from origin
+        val depths = points.map { it.z }.sorted()
+        val n = depths.size
+
+        // Median absolute deviation - much more robust
+        val median = depths[n / 2]
+        val mad = depths.map { Math.abs(it - median) }.sorted()[n / 2]
+        val threshold = 3.0 * (mad / 0.6745)  // robust sigma estimate
+
+        return points.filter {
+            Math.abs(it.z - median) < threshold && it.z > 0
+        }
     }
 
     private fun getMatValue(mat: Mat, row: Int, col: Int): Double? {
@@ -184,5 +201,4 @@ class Triangulator(private val K: Mat) {
 
         return v[0]
     }
-
 }

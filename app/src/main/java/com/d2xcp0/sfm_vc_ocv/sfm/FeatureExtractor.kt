@@ -12,12 +12,12 @@ class FeatureExtractor {
         6000,   // nfeatures
         1.2f,   // scaleFactor
         8,      // nlevels
-        50,     // edgeThreshold "how much to ignore the sides of the image" (focus on the center part) pixelben
+        50,     // edgeThreshold "how much to ignore the sides of the image" (focus on the center part) pixelben, kisebb targynal lehet pl.35-30 is akar meg kell nezni
         0,      // firstLevel
         2,      // WTA_K
         ORB.HARRIS_SCORE,
-        50,     // patchSize
-        20      // fastThreshold    strongpoint detection (a lényegesebb pontokat pl sarok ilyenek)
+        50,     // patchSize megegyezik az edge tresholddal
+        20      // fastThreshold    strongpoint detection (a lényegesebb pontokat pl sarok ilyenek alacsony texturaju kornyezetben pl 10-15 is lehet)
     )
 
     fun compute(image: Mat): Pair<MatOfKeyPoint, Mat> {

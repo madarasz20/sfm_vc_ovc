@@ -8,7 +8,7 @@ class PoseEstimator(private val K: Mat) {
 
     companion object {
         private const val TAG = "PoseEstimator"
-        private const val MIN_INLIERS = 12
+        private const val MIN_INLIERS = 20      //TODO 20
     }
 
     /*fun estimatePose(matchSet: MatchSet): Pair<Mat, Mat> {
@@ -117,7 +117,7 @@ class PoseEstimator(private val K: Mat) {
             K,
             Calib3d.RANSAC,
             0.999,
-            1.0,
+            2.0,        //TODO ez elv magas proba 2-vel
             1000
         )
 
@@ -126,12 +126,19 @@ class PoseEstimator(private val K: Mat) {
             return Mat.eye(3, 3, CvType.CV_64F) to Mat.zeros(3, 1, CvType.CV_64F)
         }
 
+        if (E.empty() || E.rows() % 3 != 0 || E.cols() != 3) {
+            Log.e(TAG, "Bad Essential matrix shape: ${E.rows()}x${E.cols()}")
+            return Mat.eye(3, 3, CvType.CV_64F) to Mat.zeros(3, 1, CvType.CV_64F)
+        }
+        // Take only the first 3x3 block
+        val E33 = E.rowRange(0, 3)
+
         val R = Mat()
         val t = Mat()
         val poseMask = Mat()
 
         val recovered = Calib3d.recoverPose(
-            E,
+            E33,
             pts1,
             pts2,
             K,
