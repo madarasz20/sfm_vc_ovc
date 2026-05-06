@@ -1,7 +1,10 @@
 package com.d2xcp0.sfm_vc_ocv.sfm
 
+import org.opencv.core.CvType
 import org.opencv.core.Mat
 import org.opencv.core.MatOfKeyPoint
+import org.opencv.core.Rect
+import org.opencv.core.Scalar
 import org.opencv.imgproc.Imgproc
 import org.opencv.features2d.ORB
 
@@ -25,6 +28,17 @@ class FeatureExtractor {
         //Convert to grayscale for orb
         val gray = Mat()
         Imgproc.cvtColor(image, gray, Imgproc.COLOR_BGR2GRAY)
+
+        val mask = Mat.zeros(gray.size(), CvType.CV_8UC1)
+        val w = gray.width()
+        val h = gray.height()
+        val roi = Rect(
+            (w * 0.05).toInt(),
+            (h * 0.05).toInt(),
+            (w * 0.90).toInt(),
+            (h * 0.90).toInt()
+        )
+        mask.submat(roi).setTo(Scalar(255.0))
 
         val keypoints = MatOfKeyPoint()
         val descriptors = Mat()

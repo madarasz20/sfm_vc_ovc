@@ -27,9 +27,6 @@
     "variantName": "debug",
     "isDebuggableEnabled": true,
     "validAbiList": [
-      "armeabi-v7a",
-      "arm64-v8a",
-      "x86",
       "x86_64"
     ],
     "buildTargetSet": [
@@ -159,6 +156,7 @@
         "rootBuildGradleFolder": "C:\\Users\\madar\\AndroidStudioProjects\\sfm_vc_ocv",
         "sdkFolder": "C:\\Users\\madar\\AppData\\Local\\Android\\Sdk",
         "isBuildOnlyTargetAbiEnabled": true,
+        "ideBuildTargetAbi": "x86_64",
         "isCmakeBuildCohabitationEnabled": false,
         "isPrefabEnabled": false
       },
