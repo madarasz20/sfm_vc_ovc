@@ -139,12 +139,52 @@ class Camera2CaptureManager(
     }
 
     private fun chooseFixedJpegSize(sizes: List<Size>): Size {
-        // Pick a moderate fixed size. Keep this unchanged after calibration.
-        // Logcat will show the selected size.
-        return sizes
-            .filter { it.width >= 1600 && it.height >= 1200 }
+        val preferredWidth = 1280
+        val preferredHeight = 960
+        val preferredRatio = preferredWidth.toDouble() / preferredHeight.toDouble()
+
+        sizes.forEach {
+            Log.i(tag, "Available JPEG size: ${it.width}x${it.height}")
+        }
+
+        val exact = sizes.firstOrNull {
+            it.width == preferredWidth && it.height == preferredHeight
+        }
+
+        if (exact != null) {
+            Log.i(tag, "Using exact preferred size: $exact")
+            return exact
+        }
+
+        val sameRatioReasonable = sizes
+            .filter {
+                val ratio = it.width.toDouble() / it.height.toDouble()
+                kotlin.math.abs(ratio - preferredRatio) < 0.02 &&
+                        it.width >= 1000 &&
+                        it.height >= 700
+            }
+            .minByOrNull {
+                kotlin.math.abs(it.width - preferredWidth) +
+                        kotlin.math.abs(it.height - preferredHeight)
+            }
+
+        if (sameRatioReasonable != null) {
+            Log.w(tag, "Preferred 1280x960 not found. Using closest 4:3 size: $sameRatioReasonable")
+            return sameRatioReasonable
+        }
+
+        val reasonable = sizes
+            .filter { it.width >= 1000 && it.height >= 700 }
             .minByOrNull { it.width * it.height }
-            ?: sizes.maxBy { it.width * it.height }
+
+        if (reasonable != null) {
+            Log.w(tag, "No 4:3 reasonable size found. Using reasonable fallback: $reasonable")
+            return reasonable
+        }
+
+        val largest = sizes.maxBy { it.width * it.height }
+        Log.w(tag, "No reasonable size found. Using largest available: $largest")
+        return largest
     }
 
     private fun createPreviewSession(textureView: TextureView) {
