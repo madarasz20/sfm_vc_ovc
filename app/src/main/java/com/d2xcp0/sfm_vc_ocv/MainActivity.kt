@@ -230,8 +230,7 @@ class MainActivity : AppCompatActivity() {
                 val imgs = resizedImgs.map { img ->
                     val und = Mat()
                     Calib3d.undistort(img, und, K, D)
-                    //und
-                    preprocess(und)
+                    und
                 }
 
                 Log.i("SfM", "Loaded ${imgs.size} images for SfM")
@@ -375,52 +374,6 @@ class MainActivity : AppCompatActivity() {
             }
         }.start()
     }
-
-    fun preprocess(img: Mat): Mat {
-        // 1. Undistorted already applied outside, so img is undistorted here
-
-        val denoised = denoise(img)
-        val sharp = sharpen(denoised)
-        val clahe = applyCLAHE(sharp)
-
-        return clahe
-    }
-
-    fun denoise(img: Mat): Mat {
-        val denoised = Mat()
-        Imgproc.bilateralFilter(img, denoised, 9, 75.0, 75.0)
-        return denoised
-    }
-
-
-    fun sharpen(img: Mat): Mat {
-        val blurred = Mat()
-        Imgproc.GaussianBlur(img, blurred, Size(0.0, 0.0), 3.0)
-
-        val sharp = Mat()
-        Core.addWeighted(img, 1.5, blurred, -0.5, 0.0, sharp)
-        return sharp
-    }
-
-
-    fun applyCLAHE(img: Mat): Mat {
-        val lab = Mat()
-        Imgproc.cvtColor(img, lab, Imgproc.COLOR_BGR2Lab)
-
-        val channels = ArrayList<Mat>()
-        Core.split(lab, channels)
-
-        val clahe = Imgproc.createCLAHE(3.0, Size(8.0, 8.0))
-        clahe.apply(channels[0], channels[0])  // L-channel only
-
-        Core.merge(channels, lab)
-
-        val result = Mat()
-        Imgproc.cvtColor(lab, result, Imgproc.COLOR_Lab2BGR)
-
-        return result
-    }
-
 
     private fun showSfMResult() {
         val cloud = reconstructedCloud

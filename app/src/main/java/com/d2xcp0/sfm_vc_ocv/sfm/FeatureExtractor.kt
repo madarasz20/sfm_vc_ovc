@@ -8,16 +8,7 @@ import org.opencv.features2d.ORB
 class FeatureExtractor {
 
     private val detector = ORB.create(
-        //3000 //number of features
-        2500,   // nfeatures
-        1.2f,   // scaleFactor
-        8,      // nlevels
-        31,     // edgeThreshold
-        0,      // firstLevel
-        2,      // WTA_K
-        ORB.HARRIS_SCORE,
-        31,     // patchSize
-        20      // fastThreshold
+        2000 //number of features
     )
 
     fun compute(image: Mat): Pair<MatOfKeyPoint, Mat> {
