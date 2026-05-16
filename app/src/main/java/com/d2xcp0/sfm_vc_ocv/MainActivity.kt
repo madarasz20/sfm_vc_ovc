@@ -69,8 +69,20 @@ class MainActivity : AppCompatActivity() {
         setContent {
             var showGallery by remember { mutableStateOf(false) }
             var showDebug   by remember { mutableStateOf(false) }
+            var showCamera by remember { mutableStateOf(false) }
 
             when {
+                showCamera -> {
+                    CameraPreviewScreen(
+                        onPhotoCaptured = { uri ->
+                            savedImages.add(uri)
+                            showCamera = false
+                        },
+                        onBack = {
+                            showCamera = false
+                        }
+                    )
+                }
                 showDebug -> {
                     var debugFiles by remember { mutableStateOf(StorageUtils.loadDebugImages(this)) }
                     DebugGalleryScreen(
@@ -90,15 +102,23 @@ class MainActivity : AppCompatActivity() {
                 }
                 else -> {
                     MainScreen(
-                        onOpenGallery    = { showGallery = true },
-                        onOpenDebug      = { showDebug = true },
-                        onOpenCamera     = { if (checkCameraPermission()) openCamera() else requestCameraPermission() },
+                        onOpenGallery = { showGallery = true },
+                        onOpenDebug = { showDebug = true },
+
+                        onOpenCamera = {
+                            if (checkCameraPermission()) {
+                                showCamera = true
+                            } else {
+                                requestCameraPermission()
+                            }
+                        },
+
                         onTestImagePaths = { testImagePaths() },
-                        onRunSfM         = { runSfM() },
-                        onShowSfMResult  = { showSfMResult() },
-                        onClearGallery   = { clearGallery() },
+                        onRunSfM = { runSfM() },
+                        onShowSfMResult = { showSfMResult() },
+                        onClearGallery = { clearGallery() },
                         onExportPointCloud = { exportPointCloud() },
-                        onCalibrate      = { runCalibration() }
+                        onCalibrate = { runCalibration() }
                     )
                 }
             }
@@ -560,8 +580,12 @@ class MainActivity : AppCompatActivity() {
 
     override fun onRequestPermissionsResult(req: Int, p: Array<out String>, g: IntArray) {
         super.onRequestPermissionsResult(req, p, g)
+        /*if (req == CAMERA_PERMISSION_CODE && g.isNotEmpty() &&
+            g[0] == PackageManager.PERMISSION_GRANTED) openCamera()*/
         if (req == CAMERA_PERMISSION_CODE && g.isNotEmpty() &&
-            g[0] == PackageManager.PERMISSION_GRANTED) openCamera()
+            g[0] == PackageManager.PERMISSION_GRANTED) {
+            Toast.makeText(this, "Camera permission granted. Press Open Camera again.", Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun removeStatisticalOutliers(points: List<Point3>, neighbors: Int = 20, stdRatio: Double = 2.0): List<Point3> {
