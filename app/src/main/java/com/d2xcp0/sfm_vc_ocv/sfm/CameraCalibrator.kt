@@ -1,23 +1,28 @@
 package com.d2xcp0.sfm_vc_ocv.sfm
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.util.Log
+import org.opencv.android.Utils
 import org.opencv.calib3d.Calib3d
 import org.opencv.core.*
 import org.opencv.imgproc.Imgproc
-import org.opencv.android.Utils
-import android.graphics.BitmapFactory
 import kotlin.math.max
 
 class CameraCalibrator(private val context: Context) {
 
     private val TAG = "CALIB"
 
-    //board images 9*6 inner corners  at /sfm_vc_ocv/app/src/main/assets/calibration
     private val boardSize = Size(9.0, 6.0)
-    private val squareSize = 28.0 // mm or any unit (TODO: confirm 28mm)
+    private val squareSize = 28.0  // ← CONFIRM this against your actual board
 
-    //Load images
+    // FIX 1: Must match resizeForCalibration() in MainActivity exactly.
+    // K is only valid for the resolution it was computed at.
+    companion object {
+        const val TARGET_SIZE = 1200.0
+    }
+
     fun loadCalibrationImages(): List<Mat> {
         val mats = mutableListOf<Mat>()
         val assetManager = context.assets
@@ -27,32 +32,38 @@ class CameraCalibrator(private val context: Context) {
 
         for (file in files) {
             try {
-                val input = assetManager.open("calibration/$file")
-                val bitmap = BitmapFactory.decodeStream(input)
+                val bitmap: Bitmap?
 
-                val mat = Mat()
-                Utils.bitmapToMat(bitmap, mat) // RGBA
-
-                Imgproc.cvtColor(mat, mat, Imgproc.COLOR_RGBA2GRAY)
-
-                //downscale large images
-                val maxDim = 1600.0
-                val scale = maxDim / max(mat.width().toDouble(), mat.height().toDouble())
-
-                if (scale < 1.0) {
-                    Imgproc.resize(
-                        mat,
-                        mat,
-                        Size(mat.width() * scale, mat.height() * scale)
-                    )
-                    Log.i(TAG, "Downscaled $file → ${mat.width()}x${mat.height()}")
+                assetManager.open("calibration/$file").use { input ->
+                    val options = BitmapFactory.Options().apply {
+                        inPreferredConfig = Bitmap.Config.RGB_565
+                    }
+                    bitmap = BitmapFactory.decodeStream(input, null, options)
                 }
 
-                mats.add(mat)
-                Log.i(TAG, "Loaded $file")
+                if (bitmap == null) {
+                    Log.e(TAG, "Failed decoding bitmap: $file")
+                    continue
+                }
+
+                val rgba = Mat()
+                Utils.bitmapToMat(bitmap, rgba)
+                bitmap.recycle()
+
+                val gray = Mat()
+                Imgproc.cvtColor(rgba, gray, Imgproc.COLOR_RGBA2GRAY)
+                rgba.release()
+
+                // FIX 1: Resize calibration images to the same resolution
+                // used by the SfM pipeline. K is only valid at the resolution
+                // it was computed at — this was the root cause of wrong fx/fy/cx/cy.
+                val resized = resizeToTarget(gray)
+
+                mats.add(resized)
+                Log.i(TAG, "Loaded $file → ${resized.width()}x${resized.height()}")
 
             } catch (e: Exception) {
-                Log.e(TAG, "Failed loading $file : ${e.message}")
+                Log.e(TAG, "Failed loading $file: ${e.message}", e)
             }
         }
 
@@ -67,46 +78,36 @@ class CameraCalibrator(private val context: Context) {
         }
 
         val objectPoints = mutableListOf<Mat>()
-        val imagePoints = mutableListOf<Mat>()
+        val imagePoints  = mutableListOf<Mat>()
 
-        //prep chessboard coordinates
         val objList = ArrayList<Point3>()
         for (y in 0 until boardSize.height.toInt()) {
             for (x in 0 until boardSize.width.toInt()) {
                 objList.add(Point3(x * squareSize, y * squareSize, 0.0))
             }
         }
-
         val objMat = MatOfPoint3f()
         objMat.fromList(objList)
 
         var foundCount = 0
 
         for ((index, img) in images.withIndex()) {
-            Log.i(TAG, "Detecting corners in image $index...")
+            Log.i(TAG, "Detecting corners in image $index (${img.width()}x${img.height()})...")
 
             val corners = MatOfPoint2f()
-            val found = Calib3d.findChessboardCorners(
-                img,
-                boardSize,
-                corners,
-                Calib3d.CALIB_CB_ADAPTIVE_THRESH + Calib3d.CALIB_CB_NORMALIZE_IMAGE
-            )
+
+            // findChessboardCornersSB does its own sub-pixel refinement internally.
+            val found = Calib3d.findChessboardCornersSB(img, boardSize, corners)
 
             if (found) {
                 foundCount++
 
-                Imgproc.cornerSubPix(
-                    img,
-                    corners,
-                    Size(11.0, 11.0),
-                    Size(-1.0, -1.0),
-                    TermCriteria(TermCriteria.EPS + TermCriteria.MAX_ITER, 30, 0.1)
-                )
+                // FIX 2: Removed redundant cornerSubPix call.
+                // findChessboardCornersSB already performs sub-pixel refinement.
+                // Running it again can slightly degrade accuracy.
 
-                objectPoints.add(objMat)
+                objectPoints.add(objMat.clone())
                 imagePoints.add(corners)
-
                 Log.i(TAG, "✔ Corners FOUND in image $index")
             } else {
                 Log.w(TAG, "✘ Corners NOT found in image $index")
@@ -116,12 +117,18 @@ class CameraCalibrator(private val context: Context) {
         Log.i(TAG, "Found corners in $foundCount / ${images.size} images")
 
         if (foundCount < 5) {
-            Log.e(TAG, "Too few valid images for calibration")
+            Log.e(TAG, "Too few valid images for calibration ($foundCount)")
             return false
         }
 
-        val K = Mat.eye(3, 3, CvType.CV_64F)
-        val dist = Mat.zeros(8, 1, CvType.CV_64F)
+        val K    = Mat.eye(3, 3, CvType.CV_64F)
+
+        // FIX 3: Use 5 distortion coefficients instead of 8.
+        // The 8-coefficient rational model can overfit with ~20 images,
+        // producing a distortion matrix that hurts rather than helps.
+        // Standard 5-coeff (k1, k2, p1, p2, k3) is stable and sufficient
+        // for a phone lens at this image count.
+        val dist = Mat.zeros(5, 1, CvType.CV_64F)
 
         val rvecs = ArrayList<Mat>()
         val tvecs = ArrayList<Mat>()
@@ -129,7 +136,7 @@ class CameraCalibrator(private val context: Context) {
         val rms = Calib3d.calibrateCamera(
             objectPoints,
             imagePoints,
-            images[0].size(),
+            images[0].size(),  // now correctly reflects TARGET_SIZE resolution
             K,
             dist,
             rvecs,
@@ -137,15 +144,29 @@ class CameraCalibrator(private val context: Context) {
         )
 
         Log.i(TAG, "Calibration RMS error: $rms")
-        Log.i(TAG, "K values = ${K.dump()}")
-        Log.i(TAG, "D values = ${dist.dump()}")
+        Log.i(TAG, "K =\n${K.dump()}")
+        Log.i(TAG, "D =\n${dist.dump()}")
 
-        Log.i(TAG, "Camera Matrix:\n$K")
-        Log.i(TAG, "Distortion Coeffs:\n$dist")
+        // RMS above ~1.5px usually means something is wrong
+        if (rms > 1.5) {
+            Log.w(TAG, "High RMS error ($rms) — check board images for blur or bad angles")
+        }
 
-        // Save to SharedPreferences
         CalibrationStorage.save(context, K, dist)
-
         return true
+    }
+
+    // Resize to TARGET_SIZE on the longest dimension, preserving aspect ratio.
+    // Identical logic to resizeForCalibration() in MainActivity.
+    private fun resizeToTarget(src: Mat): Mat {
+        val w = src.width().toDouble()
+        val h = src.height().toDouble()
+        val scale = TARGET_SIZE / max(w, h)
+
+        if (scale >= 1.0) return src.clone()
+
+        val dst = Mat()
+        Imgproc.resize(src, dst, Size(w * scale, h * scale))
+        return dst
     }
 }

@@ -12,7 +12,7 @@ class FeatureMatcher {
         private const val TAG = "FeatureMatcher"
     }
     // featurematcher for ORB
-    private val matcher = BFMatcher.create(Core.NORM_HAMMING, true)
+    private val matcher = BFMatcher.create(Core.NORM_HAMMING, false)
     // crossCheck = true
 
     fun match(
@@ -29,7 +29,7 @@ class FeatureMatcher {
             return matchSet
         }
 
-        val matches = MatOfDMatch()
+        /*val matches = MatOfDMatch()
         matcher.match(desc1, desc2, matches)
 
         val goodMatches = mutableListOf<DMatch>()
@@ -37,9 +37,30 @@ class FeatureMatcher {
             if (m.distance < 40) {  // threshold for ORB
                 goodMatches.add(m)
             }
+        }*/
+
+        val knnMatches = ArrayList<MatOfDMatch>()
+
+        matcher.knnMatch(desc1, desc2, knnMatches, 2)
+
+        val goodMatches = mutableListOf<DMatch>()
+
+        for (matMatch in knnMatches) {
+
+            val matches = matMatch.toArray()
+
+            if (matches.size >= 2) {
+
+                val best = matches[0]
+                val second = matches[1]
+                    //TODO 0.7-el is nezd meg
+                if (best.distance < 0.70f * second.distance) {
+                    goodMatches.add(best)
+                }
+            }
         }
 
-        Log.i(TAG, "Matches: total=${matches.toArray().size}, good=${goodMatches.size}")
+        Log.i(TAG, "Raw matches=${knnMatches.size}, good=${goodMatches.size}")
 
         for (gm in goodMatches) {
             matchSet.addMatch(gm.queryIdx, gm.trainIdx)

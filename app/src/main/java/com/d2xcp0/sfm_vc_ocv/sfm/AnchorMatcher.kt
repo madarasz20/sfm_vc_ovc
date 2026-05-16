@@ -2,10 +2,11 @@ package com.d2xcp0.sfm_vc_ocv.sfm
 
 import org.opencv.core.*
 import org.opencv.features2d.FlannBasedMatcher
+import org.opencv.features2d.BFMatcher
 
 class AnchorMatcher {
 
-    private val matcher = FlannBasedMatcher()
+    private val matcher = BFMatcher.create(Core.NORM_HAMMING, false)
 
     /**
      * anchor3D: List<Point3>      – 3D anchor points
@@ -25,10 +26,10 @@ class AnchorMatcher {
             return Pair(emptyList(), emptyList())
         }
 
-        val d1 = Mat()
-        val d2 = Mat()
-        anchorDesc.convertTo(d1, CvType.CV_32F)
-        descriptors.convertTo(d2, CvType.CV_32F)
+        //val d1 = Mat()
+        //val d2 = Mat()
+        //anchorDesc.convertTo(d1, CvType.CV_32F)
+        //descriptors.convertTo(d2, CvType.CV_32F)
 
         val kp2 = keypoints.toArray()
         if (kp2.isEmpty()) {
@@ -36,7 +37,7 @@ class AnchorMatcher {
         }
 
         val knnMatches = ArrayList<MatOfDMatch>()
-        matcher.knnMatch(d1, d2, knnMatches, 2)
+        matcher.knnMatch(anchorDesc, descriptors, knnMatches, 2)
 
         val out3D = ArrayList<Point3>()
         val out2D = ArrayList<Point>()
@@ -44,8 +45,8 @@ class AnchorMatcher {
         //limits
         val max3D = anchor3D.size
         val maxKP = kp2.size
-        val maxDesc1 = d1.rows()
-        val maxDesc2 = d2.rows()
+        //val maxDesc1 = d1.rows()
+        //val maxDesc2 = d2.rows()
 
         for (m in knnMatches) {
             val arr = m.toArray()
@@ -55,16 +56,14 @@ class AnchorMatcher {
             val second = arr[1]
 
             //Lowe ratio test
-            if (best.distance >= 0.7f * second.distance) continue
+            if (best.distance >= 0.75f * second.distance) continue
 
             val q = best.queryIdx   //index into anchorDesc and anchor3D
             val t = best.trainIdx   //index into descriptors and kp2
 
             //full check
-            if (q !in 0 until max3D) continue
-            if (q !in 0 until maxDesc1) continue
-            if (t !in 0 until maxKP) continue
-            if (t !in 0 until maxDesc2) continue
+            if(q !in anchor3D.indices) continue
+            if(t !in kp2.indices) continue
 
             // Valid match
             out3D.add(anchor3D[q])
