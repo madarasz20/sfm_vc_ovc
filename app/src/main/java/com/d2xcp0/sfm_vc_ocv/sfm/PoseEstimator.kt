@@ -3,12 +3,13 @@ package com.d2xcp0.sfm_vc_ocv.sfm
 import android.util.Log
 import org.opencv.calib3d.Calib3d
 import org.opencv.core.*
+import kotlin.math.pow
 
 class PoseEstimator(private val K: Mat) {
 
     companion object {
         private const val TAG = "PoseEstimator"
-        private const val MIN_INLIERS = 20
+        private const val MIN_INLIERS = 15
     }
 
     fun estimatePose(matchSet: MatchSet): Pair<Mat, Mat> {
@@ -93,6 +94,16 @@ class PoseEstimator(private val K: Mat) {
         if (inlierRatio < 0.2f) {
             Log.w(TAG, "Low inlier ratio (${"%.2f".format(inlierRatio)}) " +
                     "— consider checking image overlap or exposure consistency")
+        }
+
+        val tMag = Math.sqrt(
+            t.get(0,0)[0].pow(2) +
+                    t.get(1,0)[0].pow(2) +
+                    t.get(2,0)[0].pow(2)
+        )
+        if (tMag < 0.001) {
+            Log.w(TAG, "recoverPose returned near-zero translation — returning identity fallback")
+            return identity()
         }
 
         return R to t

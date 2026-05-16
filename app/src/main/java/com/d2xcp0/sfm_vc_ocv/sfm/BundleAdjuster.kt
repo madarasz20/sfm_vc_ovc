@@ -21,8 +21,8 @@ class BundleAdjuster(private val K: Mat, private val D: Mat) {
 
     companion object {
         private const val TAG = "BundleAdjuster"
-        private const val MAX_ITERATIONS = 10
-        private const val CONVERGENCE_THRESHOLD = 0.001  // stop if improvement < 0.1%
+        private const val MAX_ITERATIONS = 20
+        private const val CONVERGENCE_THRESHOLD = 0.0001  // stop if improvement < 0.1%
         private const val MAX_REPROJ_ERROR = 8.0         // px — points above this are outliers
         private const val MIN_TRACK_LENGTH = 2           // point must be seen in at least 2 views
     }
@@ -228,7 +228,7 @@ class BundleAdjuster(private val K: Mat, private val D: Mat) {
                 if (err > maxError) maxError = err
             }
 
-            if (maxError > MAX_REPROJ_ERROR * 3) {
+            if (maxError > MAX_REPROJ_ERROR * 4) {
                 toRemove.add(ptIdx)
             }
         }
@@ -385,7 +385,7 @@ class BundleAdjuster(private val K: Mat, private val D: Mat) {
 
     // Reject unreasonably large pose jumps during BA
     private fun poseJumpIsReasonable(Rold: Mat, Rnew: Mat, told: Mat, tnew: Mat): Boolean {
-        val dt = Mat(); Core.subtract(tnew, told, dt)
+        /*val dt = Mat(); Core.subtract(tnew, told, dt)
         val dMag = Math.sqrt(
             dt.get(0,0)[0].let{it*it} +
                     dt.get(1,0)[0].let{it*it} +
@@ -397,6 +397,10 @@ class BundleAdjuster(private val K: Mat, private val D: Mat) {
                     told.get(1,0)[0].let{it*it} +
                     told.get(2,0)[0].let{it*it}
         )
-        return dMag < tMag * 0.3 + 0.1  // 0.1 = absolute minimum tolerance
+        return dMag < tMag * 0.3 + 0.1  // 0.1 = absolute minimum tolerance*/
+        // Only reject if rotation matrix is invalid (not orthogonal)
+        val det = Mat()
+        val detVal = Core.determinant(Rnew)
+        return detVal > 0.9 && detVal < 1.1  // valid rotation matrix has det ≈ 1
     }
 }

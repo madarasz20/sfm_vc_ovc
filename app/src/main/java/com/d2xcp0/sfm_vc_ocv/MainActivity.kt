@@ -219,6 +219,10 @@ class MainActivity : AppCompatActivity() {
 
                     val (Rrel, trel) = poseEstimator.estimatePose(matches)
 
+
+
+
+
                     Log.i("SfM_DIAG", "Pair $i pose: R=${Rrel.dump()}, t=${trel.dump()}")
 
                     val Rprev = rotations.last()
@@ -226,6 +230,19 @@ class MainActivity : AppCompatActivity() {
 
                     val Rglobal = Mat()
                     Core.gemm(Rprev, Rrel, 1.0, Mat(), 0.0, Rglobal)
+
+                    // After estimatePose, log the RELATIVE rotation angle (this should be 10-15°)
+                    val relAngle = rotationAngleDeg(Rrel)
+
+// After computing Rglobal, log the GLOBAL rotation angle (this shows drift)
+                    val globalAngle = rotationAngleDeg(Rglobal)
+
+                    Log.i("SfM_DIAG", "Pair $i: relRot=${relAngle.toInt()}° globalRot=${globalAngle.toInt()}°")
+
+                    if (relAngle > 25.0) {
+                        Log.w("SfM_DIAG", "Pair $i SKIPPED: relative rotation too large (${relAngle.toInt()}°)")
+                        continue
+                    }
 
                     val temp = Mat()
                     Core.gemm(Rprev, trel, 1.0, Mat(), 0.0, temp)
@@ -431,9 +448,9 @@ class MainActivity : AppCompatActivity() {
         val ty = t.get(1, 0)[0]
         val tz = t.get(2, 0)[0]
 
-        return !tx.isNaN() && !ty.isNaN() && !tz.isNaN()
+        //return !tx.isNaN() && !ty.isNaN() && !tz.isNaN()
 
-        /*if (tx.isNaN() || ty.isNaN() || tz.isNaN()) return false
+        if (tx.isNaN() || ty.isNaN() || tz.isNaN()) return false
 
         val mag = Math.sqrt(tx*tx + ty*ty + tz*tz)
 
@@ -441,7 +458,7 @@ class MainActivity : AppCompatActivity() {
             Log.w("SfM", "Translation magnitude out of range: ${"%.5f".format(mag)}")
             return false
         }
-        return true*/
+        return true
     }
 
     private fun normalizePointCloud(points: List<Point3>): List<Point3> {
@@ -570,5 +587,12 @@ class MainActivity : AppCompatActivity() {
         val filtered = points.filterIndexed { i, _ -> meanDists[i] < threshold }
         Log.i("SfM", "Outlier removal: ${points.size} → ${filtered.size} points")
         return filtered
+    }
+
+    private fun rotationAngleDeg(R: Mat): Double {
+        // Rotation angle = arccos((trace(R) - 1) / 2)
+        val trace = R.get(0,0)[0] + R.get(1,1)[0] + R.get(2,2)[0]
+        val cosAngle = (trace - 1.0) / 2.0
+        return Math.toDegrees(Math.acos(cosAngle.coerceIn(-1.0, 1.0)))
     }
 }

@@ -17,7 +17,7 @@ class Triangulator(private val K: Mat) {
         // FIX 2: Minimum triangulation angle in degrees.
         // Points triangulated from nearly parallel rays are numerically
         // unstable — they pass the Z > 0 check but land at wrong depths.
-        private const val MIN_ANGLE_DEG = 1.0
+        private const val MIN_ANGLE_DEG = 1.0   //1.0
     }
 
     fun triangulate(
