@@ -23,6 +23,9 @@ class FeatureMatcher {
     ): MatchSet {
 
         val matchSet = MatchSet(kp1, kp2)
+        Log.i("SFM_MATCH", "kp1 = ${kp1.toArray().size}, kp2 = ${kp2.toArray().size}")
+        Log.i("SFM_MATCH", "desc1 = ${desc1.rows()}x${desc1.cols()}, type=${desc1.type()}")
+        Log.i("SFM_MATCH", "desc2 = ${desc2.rows()}x${desc2.cols()}, type=${desc2.type()}")
 
         if (desc1.empty() || desc2.empty()) {
             Log.w(TAG, "Empty descriptors, skipping match.")
@@ -59,8 +62,12 @@ class FeatureMatcher {
                 }
             }
         }
+        Log.i("SFM_MATCH", "raw knn matches = ${knnMatches.size}")
+        Log.i("SFM_MATCH", "good matches after ratio = ${goodMatches.size}")
+
 
         Log.i(TAG, "Raw matches=${knnMatches.size}, good=${goodMatches.size}")
+
 
         for (gm in goodMatches) {
             matchSet.addMatch(gm.queryIdx, gm.trainIdx)

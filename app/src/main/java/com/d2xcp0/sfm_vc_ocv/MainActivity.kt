@@ -23,15 +23,17 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
 import android.util.Log
+import com.d2xcp0.sfm_vc_ocv.camera.CameraCalibrator
+import com.d2xcp0.sfm_vc_ocv.pointcloud.PointCloudExporter
+import com.d2xcp0.sfm_vc_ocv.pointcloud.PointCloudHolder
 import org.opencv.android.OpenCVLoader
 import org.opencv.core.Mat
 import org.opencv.imgcodecs.Imgcodecs
 import org.opencv.core.*
 import org.opencv.calib3d.Calib3d
 import org.opencv.imgproc.Imgproc
-import android.graphics.BitmapFactory
+import com.d2xcp0.sfm_vc_ocv.screens.CameraPreviewScreen
 import com.d2xcp0.sfm_vc_ocv.screens.DebugGalleryScreen
-import org.opencv.android.Utils
 import kotlin.math.max
 import kotlin.math.pow
 
@@ -126,8 +128,21 @@ class MainActivity : AppCompatActivity() {
 
         val loaded = CalibrationStorage.load(this)
         if (loaded != null) {
-            K = loaded.first
-            D = loaded.second
+            //K = loaded.first
+            //D = loaded.second
+            val K = Mat(3, 3, CvType.CV_64F)
+            K.put(
+                0, 0,
+                948.000064, 0.0,        640.0,
+                0.0,        948.000064, 480.0,
+                0.0,        0.0,        1.0
+            )
+
+            val D = Mat(1, 5, CvType.CV_64F)
+            D.put(
+                0, 0,
+                0.0, 0.0, 0.0, 0.0, 0.0
+            )
             Log.i("CALIB", "Loaded calibration: K=${K?.dump()}")
         } else {
             Log.w("CALIB", "No calibration found!")
@@ -192,7 +207,6 @@ class MainActivity : AppCompatActivity() {
                     und
                 }
 
-                Log.i("SfM", "Loaded ${imgs.size} images")
 
                 val extractor     = FeatureExtractor()
                 val matcher       = FeatureMatcher()

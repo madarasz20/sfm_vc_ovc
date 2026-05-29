@@ -1,7 +1,11 @@
-package com.d2xcp0.sfm_vc_ocv.sfm
+package com.d2xcp0.sfm_vc_ocv
 
 import android.content.Context
-import org.opencv.core.*
+import org.opencv.core.DMatch
+import org.opencv.core.Mat
+import org.opencv.core.MatOfDMatch
+import org.opencv.core.MatOfKeyPoint
+import org.opencv.core.Point
 import org.opencv.features2d.Features2d
 import org.opencv.imgcodecs.Imgcodecs
 import java.io.File

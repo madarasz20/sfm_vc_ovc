@@ -1,4 +1,4 @@
-package com.d2xcp0.sfm_vc_ocv.sfm
+package com.d2xcp0.sfm_vc_ocv.pointcloud
 
 import android.opengl.GLES20
 import android.opengl.GLSurfaceView

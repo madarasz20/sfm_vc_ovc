@@ -1,8 +1,9 @@
-package com.d2xcp0.sfm_vc_ocv.sfm
+package com.d2xcp0.sfm_vc_ocv.pointcloud
 
 import android.content.Context
 import android.opengl.GLSurfaceView
 import android.view.MotionEvent
+import com.d2xcp0.sfm_vc_ocv.pointcloud.PointCloudRenderer
 
 class PointCloudGLSurfaceView(context: Context) : GLSurfaceView(context) {
 

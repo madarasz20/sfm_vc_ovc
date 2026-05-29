@@ -8,6 +8,7 @@ import org.opencv.core.Scalar
 import org.opencv.imgproc.Imgproc
 import org.opencv.features2d.ORB
 import org.opencv.features2d.SIFT
+import android.util.Log
 
 //import org.opencv.imgproc.Imgproc.Canny
 
@@ -39,6 +40,7 @@ class FeatureExtractor {
         //Convert to grayscale for orb
         val gray = Mat()
         Imgproc.cvtColor(image, gray, Imgproc.COLOR_BGR2GRAY)
+        Log.i("SFM_INPUT", "FeatureExtractor input image = ${image.cols()}x${image.rows()}, type=${image.type()}, channels=${image.channels()}")
 
         val mask = Mat.zeros(gray.size(), CvType.CV_8UC1)
         val w = gray.width()
@@ -50,16 +52,22 @@ class FeatureExtractor {
             (h * 0.90).toInt()
         )
         mask.submat(roi).setTo(Scalar(255.0))
+        Log.i("SFM_INPUT", "FeatureExtractor ROI = x=${roi.x}, y=${roi.y}, w=${roi.width}, h=${roi.height}")
 
         val keypoints = MatOfKeyPoint()
         val descriptors = Mat()
 
         detector.detectAndCompute(
             gray,
-            Mat(),
+             mask,
             keypoints,
             descriptors
         )
+
+        Log.i("SFM_MATCH", "FeatureExtractor keypoints = ${keypoints.toArray().size}")
+        Log.i("SFM_MATCH", "FeatureExtractor descriptors = ${descriptors.rows()}x${descriptors.cols()}, type=${descriptors.type()}")
+
+
 
         return keypoints to descriptors
     }

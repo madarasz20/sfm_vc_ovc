@@ -1,11 +1,18 @@
-package com.d2xcp0.sfm_vc_ocv.sfm
+package com.d2xcp0.sfm_vc_ocv.camera
 
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.ImageFormat
 import android.graphics.SurfaceTexture
-import android.hardware.camera2.*
+import android.hardware.camera2.CameraCaptureSession
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraDevice
+import android.hardware.camera2.CameraManager
+import android.hardware.camera2.CameraMetadata
+import android.hardware.camera2.CaptureRequest
+import android.hardware.camera2.CaptureResult
+import android.hardware.camera2.TotalCaptureResult
 import android.media.Image
 import android.media.ImageReader
 import android.net.Uri
@@ -20,7 +27,9 @@ import androidx.core.content.FileProvider
 import java.io.File
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
-import java.util.*
+import java.util.Date
+import java.util.Locale
+import kotlin.math.abs
 
 class Camera2CaptureManager(
     private val context: Context
@@ -67,7 +76,7 @@ class Camera2CaptureManager(
     }
 
     private fun openCamera(textureView: TextureView) {
-        val manager = context.getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
+        val manager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
 
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA)
             != PackageManager.PERMISSION_GRANTED
@@ -126,7 +135,7 @@ class Camera2CaptureManager(
         )
     }
 
-    private fun chooseBackCamera(manager: android.hardware.camera2.CameraManager): String? {
+    private fun chooseBackCamera(manager: CameraManager): String? {
         for (id in manager.cameraIdList) {
             val characteristics = manager.getCameraCharacteristics(id)
             val facing = characteristics.get(CameraCharacteristics.LENS_FACING)
@@ -159,13 +168,13 @@ class Camera2CaptureManager(
         val sameRatioReasonable = sizes
             .filter {
                 val ratio = it.width.toDouble() / it.height.toDouble()
-                kotlin.math.abs(ratio - preferredRatio) < 0.02 &&
+                abs(ratio - preferredRatio) < 0.02 &&
                         it.width >= 1000 &&
                         it.height >= 700
             }
             .minByOrNull {
-                kotlin.math.abs(it.width - preferredWidth) +
-                        kotlin.math.abs(it.height - preferredHeight)
+                abs(it.width - preferredWidth) +
+                        abs(it.height - preferredHeight)
             }
 
         if (sameRatioReasonable != null) {

@@ -1,4 +1,4 @@
-package com.d2xcp0.sfm_vc_ocv.sfm
+package com.d2xcp0.sfm_vc_ocv.screens
 
 import android.net.Uri
 import android.view.TextureView
@@ -10,6 +10,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.d2xcp0.sfm_vc_ocv.camera.Camera2CaptureManager
 
 @Composable
 fun CameraPreviewScreen(
