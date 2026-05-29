@@ -19,7 +19,7 @@ class FeatureExtractor {
         //3000 //number of features
         6000,   // nfeatures
         1.35f,   // scaleFactor 1.2
-        8,      // nlevels
+        8,      // nlevels 8
         50,     // edgeThreshold "how much to ignore the sides of the image" (focus on the center part) pixelben, kisebb targynal lehet pl.35-30 is akar meg kell nezni
         0,      // firstLevel
         2,      // WTA_K

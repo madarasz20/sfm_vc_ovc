@@ -30,6 +30,9 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
+import android.graphics.Rect
+import org.opencv.core.CvType
+import org.opencv.core.Mat
 
 class Camera2CaptureManager(
     private val context: Context
@@ -46,6 +49,10 @@ class Camera2CaptureManager(
     private var cameraId: String? = null
     private var jpegSize: Size? = null
     private var latestCallback: ((Uri) -> Unit)? = null
+
+    //private var cameraK: Mat? = null
+    //private var cameraD: Mat? = null
+    private var intrinsicSourceSize: Size? = null
 
     fun startCamera(textureView: TextureView) {
         startBackgroundThread()
@@ -98,7 +105,12 @@ class Camera2CaptureManager(
         val jpegSizes = map?.getOutputSizes(ImageFormat.JPEG)?.toList().orEmpty()
         jpegSize = chooseFixedJpegSize(jpegSizes)
 
+// IMPORTANT: call after jpegSize is known
+        //extractCameraCalibration(characteristics)
+
         Log.i(tag, "Using cameraId=$cameraId jpegSize=$jpegSize")
+        /*Log.i(tag, "K JPEG = ${getCameraKForJpeg().dump()}")
+        Log.i(tag, "D = ${getCameraD().dump()}")*/
 
         imageReader = ImageReader.newInstance(
             jpegSize!!.width,
@@ -257,7 +269,7 @@ class Camera2CaptureManager(
         applyStableSettings(captureRequest)
 
         // May need adjustment depending on device orientation.
-        captureRequest.set(CaptureRequest.JPEG_ORIENTATION, 90)
+        captureRequest.set(CaptureRequest.JPEG_ORIENTATION, 90)  //90
 
         session.capture(
             captureRequest.build(),
@@ -354,4 +366,134 @@ class Camera2CaptureManager(
         backgroundThread = null
         backgroundHandler = null
     }
+    /*private fun extractCameraCalibration(
+        characteristics: CameraCharacteristics
+    ): Pair<Mat, Mat> {
+
+        val intrinsics = characteristics.get(
+            CameraCharacteristics.LENS_INTRINSIC_CALIBRATION
+        ) ?: throw IllegalStateException(
+            "Camera2 intrinsics unavailable: LENS_INTRINSIC_CALIBRATION is null"
+        )
+
+        val distortion = characteristics.get(
+            CameraCharacteristics.LENS_DISTORTION
+        )
+
+        val activeArray = characteristics.get(
+            CameraCharacteristics.SENSOR_INFO_PRE_CORRECTION_ACTIVE_ARRAY_SIZE
+        )
+
+        val fx = intrinsics[0].toDouble()
+        val fy = intrinsics[1].toDouble()
+        val cx = intrinsics[2].toDouble()
+        val cy = intrinsics[3].toDouble()
+        val skew = intrinsics[4].toDouble()
+
+        val K = Mat.eye(3, 3, CvType.CV_64F)
+        K.put(0, 0, fx)
+        K.put(0, 1, skew)
+        K.put(0, 2, cx)
+
+        K.put(1, 0, 0.0)
+        K.put(1, 1, fy)
+        K.put(1, 2, cy)
+
+        K.put(2, 0, 0.0)
+        K.put(2, 1, 0.0)
+        K.put(2, 2, 1.0)
+
+        val D = if (distortion != null) {
+            val d = Mat.zeros(1, distortion.size, CvType.CV_64F)
+            for (i in distortion.indices) {
+                d.put(0, i, distortion[i].toDouble())
+            }
+            d
+        } else {
+            Log.w(tag, "Camera2 distortion unavailable: LENS_DISTORTION is null")
+            Mat.zeros(1, 5, CvType.CV_64F)
+        }
+
+        cameraK = K
+        cameraD = D
+
+        intrinsicSourceSize = activeArray?.let { rect ->
+            Size(rect.width(), rect.height())
+        }
+
+        Log.i(tag, "Camera2 intrinsics raw = ${intrinsics.joinToString()}")
+        Log.i(tag, "Camera2 distortion raw = ${distortion?.joinToString()}")
+        Log.i(tag, "Camera2 active/pre-correction array = $activeArray")
+        Log.i(tag, "Camera2 K raw = ${K.dump()}")
+        Log.i(tag, "Camera2 D raw = ${D.dump()}")
+
+        return K to D
+    }
+    fun getCameraKForJpeg(): Mat {
+        val Kraw = cameraK ?: throw IllegalStateException(
+            "cameraK is not initialized. Call extractCameraCalibration() after opening the camera."
+        )
+
+        val src = intrinsicSourceSize ?: throw IllegalStateException(
+            "intrinsicSourceSize is not initialized."
+        )
+
+        val dst = jpegSize ?: throw IllegalStateException(
+            "jpegSize is not initialized."
+        )
+
+        val scaleX = dst.width.toDouble() / src.width.toDouble()
+        val scaleY = dst.height.toDouble() / src.height.toDouble()
+
+        val K = Kraw.clone()
+
+        K.put(0, 0, Kraw.get(0, 0)[0] * scaleX) // fx
+        K.put(0, 1, Kraw.get(0, 1)[0] * scaleX) // skew
+        K.put(0, 2, Kraw.get(0, 2)[0] * scaleX) // cx
+
+        K.put(1, 0, 0.0)
+        K.put(1, 1, Kraw.get(1, 1)[0] * scaleY) // fy
+        K.put(1, 2, Kraw.get(1, 2)[0] * scaleY) // cy
+
+        K.put(2, 0, 0.0)
+        K.put(2, 1, 0.0)
+        K.put(2, 2, 1.0)
+
+        Log.i(tag, "Scaled K for JPEG $dst from source $src = ${K.dump()}")
+
+        return K
+    }
+
+    fun getCameraD(): Mat {
+        return cameraD?.clone()
+            ?: throw IllegalStateException(
+                "cameraD is not initialized. Call extractCameraCalibration() after opening the camera."
+            )
+    }
+
+    fun getJpegSize(): Size {
+        return jpegSize ?: throw IllegalStateException(
+            "jpegSize is not initialized. Camera has not selected JPEG size yet."
+        )
+    }
+    fun initializeCalibrationOnly() {
+        val manager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+
+        val id = chooseBackCamera(manager)
+            ?: throw IllegalStateException("No back camera found")
+
+        cameraId = id
+
+        val characteristics = manager.getCameraCharacteristics(id)
+        val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+
+        val jpegSizes = map?.getOutputSizes(ImageFormat.JPEG)?.toList().orEmpty()
+        jpegSize = chooseFixedJpegSize(jpegSizes)
+
+        extractCameraCalibration(characteristics)
+
+        Log.i(tag, "Calibration initialized only. cameraId=$cameraId jpegSize=$jpegSize")
+        Log.i(tag, "K JPEG = ${getCameraKForJpeg().dump()}")
+        Log.i(tag, "D = ${getCameraD().dump()}")
+    }*/
 }

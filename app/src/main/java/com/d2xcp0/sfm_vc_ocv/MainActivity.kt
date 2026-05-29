@@ -23,6 +23,8 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
 import android.util.Log
+import com.d2xcp0.sfm_vc_ocv.camera.Camera2CalibrationProvider
+import com.d2xcp0.sfm_vc_ocv.camera.Camera2CaptureManager
 import com.d2xcp0.sfm_vc_ocv.camera.CameraCalibrator
 import com.d2xcp0.sfm_vc_ocv.pointcloud.PointCloudExporter
 import com.d2xcp0.sfm_vc_ocv.pointcloud.PointCloudHolder
@@ -46,6 +48,7 @@ class MainActivity : AppCompatActivity() {
     private var reconstructedCloud: List<Point3>? = null
     private var K: Mat? = null
     private var D: Mat? = null
+    private lateinit var camera2CaptureManager: Camera2CaptureManager
 
     companion object {
         init { System.loadLibrary("native-lib") }
@@ -62,6 +65,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        //camera2CaptureManager = Camera2CaptureManager(this)
+        //camera2CaptureManager.initializeCalibrationOnly()
 
         if (OpenCVLoader.initDebug())
             Log.i("OpenCV", "OpenCV loaded successfully!")
@@ -126,7 +131,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        val loaded = CalibrationStorage.load(this)
+        /*val loaded = CalibrationStorage.load(this)
         if (loaded != null) {
             //K = loaded.first
             //D = loaded.second
@@ -146,7 +151,21 @@ class MainActivity : AppCompatActivity() {
             Log.i("CALIB", "Loaded calibration: K=${K?.dump()}")
         } else {
             Log.w("CALIB", "No calibration found!")
-        }
+        }*/
+        val K = Mat(3, 3, CvType.CV_64F)
+        K.put(
+            0, 0,
+            948.000064, 0.0,        640.0,
+            0.0,        948.000064, 480.0,
+            0.0,        0.0,        1.0
+        )
+
+        val D = Mat(1, 5, CvType.CV_64F)
+        D.put(
+            0, 0,
+            0.0, 0.0, 0.0, 0.0, 0.0
+        )
+        Log.i("CALIB", "Loaded calibration: K=${K?.dump()}")
     }
 
     private fun runCalibration() {
@@ -182,6 +201,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun runSfM() {
+        //legalabb 2 kepet kellett csinalni hogy lehessenfuttatni
         if (savedImages.size < 2) {
             Toast.makeText(this, "Need at least 2 images!", Toast.LENGTH_SHORT).show()
             return
@@ -189,25 +209,52 @@ class MainActivity : AppCompatActivity() {
 
         Thread {
             try {
-                val calibPair = CalibrationStorage.load(this)
+                /*val calibPair = CalibrationStorage.load(this)   //ez hiba, nem ez a kalibráció kell, hanem a camera2 K, D
                 if (calibPair == null) {
                     runOnUiThread {
                         Toast.makeText(this, "No calibration found!", Toast.LENGTH_LONG).show()
                     }
                     return@Thread
-                }
+                }//idáig nem kell
                 val K = calibPair.first
                 val D = calibPair.second
 
+                //ez megint kuka sztem
                 val rawImgs     = savedImages.map { uri -> uriToMat(uri) }
+
                 val resizedImgs = rawImgs.map { img -> resizeForSfM(img) }
                 val imgs        = resizedImgs.map { img ->
                     val und = Mat()
                     Calib3d.undistort(img, und, K, D)
                     und
+                }//idáig*/
+
+                val rawImgs = savedImages.map { uri -> uriToMat(uri) }
+
+                rawImgs.forEachIndexed { idx, img ->
+                    Log.i("SFM_SIZE", "raw[$idx] = ${img.cols()} x ${img.rows()}")
                 }
 
+                val firstImg = rawImgs.first()
 
+                val calib = Camera2CalibrationProvider.loadBackCameraCalibration(
+                    context = this,
+                    targetWidth = firstImg.cols(),
+                    targetHeight = firstImg.rows()
+                )
+
+                val K = calib.K
+                val D = calib.D
+
+                Log.i("SFM_CALIB", "Using K=${K.dump()}")
+                Log.i("SFM_CALIB", "Using D=${D.dump()}")
+
+                val imgs = rawImgs
+
+
+
+
+                //peldanyostunk OK
                 val extractor     = FeatureExtractor()
                 val matcher       = FeatureMatcher()
                 val poseEstimator = PoseEstimator(K)
@@ -215,12 +262,15 @@ class MainActivity : AppCompatActivity() {
                 val poseRefiner   = PoseRefiner(K, D)
                 val anchorMatcher = AnchorMatcher()
 
+                // minden keprol jellemzo kivon
                 Log.i("SfM", "Extracting features for all frames...")
                 val allFeatures = imgs.map { img -> extractor.compute(img) }
 
+                //legjobb par kivalaszt Miert?
                 val bestPair = findBestInitialPair(imgs, allFeatures, matcher)
                 Log.i("SfM", "Best initial pair = $bestPair-${bestPair + 1}")
 
+                //identity matrix cretion
                 val rotations    = mutableListOf<Mat>()
                 val translations = mutableListOf<Mat>()
                 rotations.add(Mat.eye(3, 3, CvType.CV_64F))
@@ -244,6 +294,7 @@ class MainActivity : AppCompatActivity() {
                     val matches = matcher.match(desc1, desc2, kp1, kp2)
                     Log.i("SfM", "Pair $i-${i+1}: ${matches.size} matches")
 
+                    //ez lehet nagyon lecsokkenti a parokat, miert kell
                     if (matches.size < 20) {
                         Log.w("SfM", "Skipping pair $i-${i+1}: too few matches (${matches.size})")
                         Log.w("SfM_DIAG", "Pair $i SKIPPED: only ${matches.size} matches")
@@ -251,6 +302,7 @@ class MainActivity : AppCompatActivity() {
                         continue
                     }
 
+                    //R,T eloallit
                     val (Rrel, trel) = poseEstimator.estimatePose(matches)
 
 
@@ -259,6 +311,7 @@ class MainActivity : AppCompatActivity() {
 
                     Log.i("SfM_DIAG", "Pair $i pose: R=${Rrel.dump()}, t=${trel.dump()}")
 
+                    //az utolso pozt veszi csak figyelembe?
                     val Rprev = rotations.last()
                     val tprev = translations.last()
 
@@ -283,6 +336,7 @@ class MainActivity : AppCompatActivity() {
                     val tglobal = Mat()
                     Core.add(tprev, temp, tglobal)
 
+                    //triangulacio globalis rotation és translation matrixxal
                     val coarseCloud = triangulator.triangulate(
                         matches, Rprev, tprev, Rglobal, tglobal
                     )
@@ -294,6 +348,7 @@ class MainActivity : AppCompatActivity() {
                         continue
                     }
 
+                    //miert kell az anchorcloud mit csinal?
                     if ((anchorCloud == null || i == bestPair) && coarseCloud.size > 30) {
                         anchorCloud       = coarseCloud
                         anchorDescriptors = desc1.clone()
