@@ -19,7 +19,9 @@ fun MainScreen(
     onClearGallery: () -> Unit,
     onExportPointCloud: () -> Unit,
     onCalibrate: () -> Unit,
-    onOpenDebug: () -> Unit
+    onOpenDebug: () -> Unit,
+    onSaveSession: () -> Unit,
+    onLoadSession: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -62,7 +64,15 @@ fun MainScreen(
         Spacer(Modifier.height(16.dp))
 
         Button(onClick = onOpenDebug) { Text("Show Debug Matches") }
+        Spacer(Modifier.height(16.dp))
 
+        Button(onClick = onSaveSession, modifier = Modifier.fillMaxWidth()) {
+            Text("Save Session")
+        }
+        Spacer(Modifier.height(16.dp))
+        Button(onClick = onLoadSession, modifier = Modifier.fillMaxWidth()) {
+            Text("Load Session")
+        }
 
     }
 }

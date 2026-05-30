@@ -125,7 +125,9 @@ class MainActivity : AppCompatActivity() {
                         onShowSfMResult = { showSfMResult() },
                         onClearGallery = { clearGallery() },
                         onExportPointCloud = { exportPointCloud() },
-                        onCalibrate = { runCalibration() }
+                        onCalibrate = { runCalibration() },
+                        onSaveSession = {saveSession()},
+                        onLoadSession = {loadSession()}
                     )
                 }
             }
@@ -729,4 +731,77 @@ class MainActivity : AppCompatActivity() {
         val cosAngle = (trace - 1.0) / 2.0
         return Math.toDegrees(Math.acos(cosAngle.coerceIn(-1.0, 1.0)))
     }
+
+    private fun saveSession() {
+        try {
+            if (savedImages.isEmpty()) {
+                Toast.makeText(this, "No images to save!", Toast.LENGTH_SHORT).show()
+                return
+            }
+            val dir = getExternalFilesDir("Sessions")
+            dir?.mkdirs()
+            val file = File(dir, "last_session.txt")
+            file.writeText(savedImages.joinToString("\n") { it.toString() })
+            Toast.makeText(this, "Session saved: ${savedImages.size} images", Toast.LENGTH_SHORT).show()
+            savedImages.forEachIndexed { i, uri ->
+                Log.i("SESSION", "save[$i] uri=$uri scheme=${uri.scheme} path=${uri.path}")
+            }
+            Log.i("SESSION", "Saved ${savedImages.size} URIs to ${file.absolutePath}")
+        } catch (e: Exception) {
+            Log.e("SESSION", "Save failed", e)
+            Toast.makeText(this, "Save failed: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun loadSession() {
+        try {
+            val file = File(getExternalFilesDir("Sessions"), "last_session.txt")
+            if (!file.exists()) {
+                Toast.makeText(this, "No saved session found", Toast.LENGTH_SHORT).show()
+                return
+            }
+
+            savedImages.clear()
+            var loaded = 0
+            var skipped = 0
+
+            file.readLines()
+                .filter { it.isNotBlank() }
+                .forEach { line ->
+                    try {
+                        val uri = Uri.parse(line)
+
+                        val canOpen = try {
+                            contentResolver.openInputStream(uri)?.use { true } ?: false
+                        } catch (e: Exception) {
+                            false
+                        }
+
+                        if (canOpen) {
+                            savedImages.add(uri)
+                            loaded++
+                            Log.i("SESSION", "Loaded URI: $uri")
+                        } else {
+                            Log.w("SESSION", "Skipping unreadable URI: $line")
+                            skipped++
+                        }
+                    } catch (e: Exception) {
+                        Log.w("SESSION", "Failed to parse URI: $line", e)
+                        skipped++
+                    }
+                }
+
+            val msg = if (skipped > 0)
+                "Loaded $loaded images ($skipped unreadable)"
+            else
+                "Loaded $loaded images"
+
+            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+            Log.i("SESSION", "Loaded $loaded URIs, skipped $skipped")
+        } catch (e: Exception) {
+            Log.e("SESSION", "Load failed", e)
+            Toast.makeText(this, "Load failed: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
 }
