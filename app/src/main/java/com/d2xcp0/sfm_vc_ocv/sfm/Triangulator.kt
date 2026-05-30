@@ -4,6 +4,31 @@ import android.util.Log
 import org.opencv.calib3d.Calib3d
 import org.opencv.core.*
 
+data class TriangulatedPoint(
+    val point3D: Point3,
+    val point2DLeft: Point,
+    val point2DRight: Point,
+    val matchIndex: Int
+)
+
+data class TriangulationResult(
+    val points: List<TriangulatedPoint>
+) {
+    val points3D: List<Point3>
+        get() = points.map { it.point3D }
+
+    val points2DLeft: List<Point>
+        get() = points.map { it.point2DLeft }
+
+    val points2DRight: List<Point>
+        get() = points.map { it.point2DRight }
+
+    val matchIndices: List<Int>
+        get() = points.map { it.matchIndex }
+
+    val size: Int
+        get() = points.size
+}
 class Triangulator(private val K: Mat) {
 
     companion object {
@@ -24,29 +49,29 @@ class Triangulator(private val K: Mat) {
         matches: MatchSet,
         R1: Mat, t1: Mat,
         R2: Mat, t2: Mat
-    ): List<Point3> {
+    ): TriangulationResult {
 
         val (pts1, pts2) = matches.getMatchedPoints()
 
         if (pts1.isEmpty() || pts2.isEmpty() || pts1.size != pts2.size) {
             Log.w(TAG, "No matched points or size mismatch for triangulation.")
-            return emptyList()
+            return TriangulationResult(emptyList())
         }
 
         if (R1.empty() || R2.empty() || t1.empty() || t2.empty()) {
             Log.e(TAG, "Empty pose matrix")
-            return emptyList()
+            return TriangulationResult(emptyList())
         }
 
         if (R1.rows() != 3 || R1.cols() != 3 || R2.rows() != 3 || R2.cols() != 3) {
             Log.e(TAG, "Rotation matrices must be 3x3")
-            return emptyList()
+            return TriangulationResult(emptyList())
         }
 
         if (t1.rows() != 3 || t1.cols() != 1 || t2.rows() != 3 || t2.cols() != 1) {
             Log.e(TAG, "Translation vectors must be 3x1, " +
                     "got t1=${t1.rows()}x${t1.cols()} t2=${t2.rows()}x${t2.cols()}")
-            return emptyList()
+            return TriangulationResult(emptyList())
         }
 
         val R1d = Mat(); val R2d = Mat()
@@ -61,11 +86,11 @@ class Triangulator(private val K: Mat) {
 
         for (r in 0 until 3) {
             for (c in 0 until 3) {
-                Rt1.put(r, c, getMatValue(R1d, r, c) ?: return emptyList())
-                Rt2.put(r, c, getMatValue(R2d, r, c) ?: return emptyList())
+                Rt1.put(r, c, getMatValue(R1d, r, c) ?: return TriangulationResult(emptyList()))
+                Rt2.put(r, c, getMatValue(R2d, r, c) ?: return TriangulationResult(emptyList()))
             }
-            Rt1.put(r, 3, getMatValue(t1d, r, 0) ?: return emptyList())
-            Rt2.put(r, 3, getMatValue(t2d, r, 0) ?: return emptyList())
+            Rt1.put(r, 3, getMatValue(t1d, r, 0) ?: return TriangulationResult(emptyList()))
+            Rt2.put(r, 3, getMatValue(t2d, r, 0) ?: return TriangulationResult(emptyList()))
         }
 
         val P1 = Mat(); val P2 = Mat()
@@ -80,7 +105,7 @@ class Triangulator(private val K: Mat) {
 
         if (pts4d.empty() || pts4d.rows() != 4 || pts4d.cols() == 0) {
             Log.e(TAG, "triangulatePoints failed: ${pts4d.rows()}x${pts4d.cols()}")
-            return emptyList()
+            return TriangulationResult(emptyList())
         }
 
         // Extract camera centres for angle computation
@@ -88,7 +113,7 @@ class Triangulator(private val K: Mat) {
         val C1 = computeCameraCenter(R1d, t1d)
         val C2 = computeCameraCenter(R2d, t2d)
 
-        val cloud = mutableListOf<Point3>()
+        val cloud = mutableListOf<TriangulatedPoint>()
         var rejectedBehind  = 0
         var rejectedDepth   = 0
         var rejectedAngle   = 0
@@ -111,15 +136,28 @@ class Triangulator(private val K: Mat) {
                 rejectedInvalid++
                 continue
             }
+            val point3D = Point3(X, Y, Z)
+
+            val depth1 = depthInCamera(R1d, t1d, point3D)
+            val depth2 = depthInCamera(R2d, t2d, point3D)
 
             // Must be in front of camera 1
-            if (Z <= 0) {
+            /*if (Z <= 0) {
+                rejectedBehind++
+                continue
+            }*/
+            // Must be in front of both cameras
+            if (depth1 <= 0.0 || depth2 <= 0.0) {
                 rejectedBehind++
                 continue
             }
 
             // FIX 1: Tighter depth bound appropriate for small object scanning
-            if (Z > MAX_DEPTH) {
+            /*if (Z > MAX_DEPTH) {
+                rejectedDepth++
+                continue
+            }*/
+            if (depth1 > MAX_DEPTH || depth2 > MAX_DEPTH) {
                 rejectedDepth++
                 continue
             }
@@ -133,19 +171,31 @@ class Triangulator(private val K: Mat) {
                 continue
             }
 
-            cloud.add(Point3(X, Y, Z))
+            cloud.add(
+                TriangulatedPoint(
+                    point3D = Point3(X, Y, Z),
+                    point2DLeft = pts1[i],
+                    point2DRight = pts2[i],
+                    matchIndex = i
+                )
+            )
         }
 
         Log.i(TAG, "Raw triangulated: ${cloud.size}/$n " +
                 "(behind=$rejectedBehind, depth=$rejectedDepth, " +
                 "angle=$rejectedAngle, invalid=$rejectedInvalid)")
 
-        // FIX 3: MAD-based outlier filter on Z depth (your already-applied fix,
-        // kept here). This is correct — using depth not distance from origin.
         val filtered = filterByMAD(cloud)
         Log.i(TAG, "After MAD filter: ${filtered.size}/${cloud.size}")
 
-        return filtered
+        Log.i(
+            TAG,
+            "TriangulationResult: 3D=${filtered.size}, " +
+                    "2DLeft=${filtered.size}, 2DRight=${filtered.size}, " +
+                    "firstMatchIndices=${filtered.take(10).map { it.matchIndex }}"
+        )
+
+        return TriangulationResult(filtered)
     }
 
     // Compute camera centre in world coordinates: C = -R^T * t
@@ -157,6 +207,19 @@ class Triangulator(private val K: Mat) {
         return doubleArrayOf(C.get(0,0)[0], C.get(1,0)[0], C.get(2,0)[0])
     }
 
+    private fun depthInCamera(R: Mat, t: Mat, point: Point3): Double {
+        val x = point.x
+        val y = point.y
+        val z = point.z
+
+        val zCam =
+            R.get(2, 0)[0] * x +
+                    R.get(2, 1)[0] * y +
+                    R.get(2, 2)[0] * z +
+                    t.get(2, 0)[0]
+
+        return zCam
+    }
     // Angle (degrees) between the two rays from each camera centre to point P
     private fun triangulationAngle(
         X: Double, Y: Double, Z: Double,
@@ -178,10 +241,10 @@ class Triangulator(private val K: Mat) {
     }
 
     // MAD-based depth filter — robust to outliers unlike percentile clipping
-    private fun filterByMAD(points: List<Point3>): List<Point3> {
+    private fun filterByMAD(points: List<TriangulatedPoint>): List<TriangulatedPoint> {
         if (points.size < 10) return points
 
-        val depths = points.map { it.z }.sorted()
+        val depths = points.map { it.point3D.z }.sorted()
         val n = depths.size
         val median = depths[n / 2]
         val mad = depths.map { Math.abs(it - median) }.sorted()[n / 2]
@@ -193,7 +256,8 @@ class Triangulator(private val K: Mat) {
         val threshold = 3.0 * (mad / 0.6745)
 
         return points.filter {
-            Math.abs(it.z - median) < threshold && it.z > 0
+            val z = it.point3D.z
+            Math.abs(z - median) < threshold && z > 0
         }
     }
 
@@ -204,4 +268,5 @@ class Triangulator(private val K: Mat) {
         if (v.isEmpty()) return null
         return v[0]
     }
+
 }

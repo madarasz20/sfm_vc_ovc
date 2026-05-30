@@ -339,7 +339,7 @@ class MainActivity : AppCompatActivity() {
                     Core.add(tprev, temp, tglobal)
 
                     //triangulacio globalis rotation és translation matrixxal
-                    val coarseCloud = triangulator.triangulate(
+                    /*val coarseCloud = triangulator.triangulate(
                         matches, Rprev, tprev, Rglobal, tglobal
                     )
                     Log.i("SfM", "Pair $i coarse triangulation: ${coarseCloud.size} points")
@@ -348,7 +348,31 @@ class MainActivity : AppCompatActivity() {
                         Log.w("SfM", "No 3D points for pair $i, skipping")
                         Log.w("SfM", "CoarseCloud pair skipping: Pair $i SKIPPED: empty coarse cloud")
                         continue
-                    }
+                    }*/
+                    val tri = triangulator.triangulate(matches, Rprev, tprev, Rglobal, tglobal)
+
+                    val coarseCloud = tri.points3D
+                    val pts1Triangulated = tri.points2DLeft
+                    val pts2Triangulated = tri.points2DRight
+
+                    Log.i("SFM_PAIRING", "tri 3D=${coarseCloud.size}")
+                    Log.i("SFM_PAIRING", "tri 2D left=${pts1Triangulated.size}")
+                    Log.i("SFM_PAIRING", "tri 2D right=${pts2Triangulated.size}")
+                    Log.i("SFM_PAIRING", "tri matchIndices=${tri.matchIndices.take(10)}")
+
+                    var (refinedCloud, Rref, tref) = poseRefiner.refine(
+                        coarseCloud,
+                        pts2Triangulated,
+                        Rglobal,
+                        tglobal
+                    )
+
+                    /*poseRefiner.refine(
+                        coarseCloud,
+                        pts2Triangulated,
+                        Rglobal,
+                        tglobal
+                    )*/
 
                     //miert kell az anchorcloud mit csinal?
                     /*if ((anchorCloud == null || i == bestPair) && coarseCloud.size > 30) {
@@ -359,12 +383,12 @@ class MainActivity : AppCompatActivity() {
 
                     // Get the inlier 2D points for frame i+1 before pose refinement
                     // (matches may be updated by estimatePose — capture here)
-                    val (pts1matched, pts2matched) = matches.getMatchedPoints()
+                    /*val (pts1matched, pts2matched) = matches.getMatchedPoints()
 
                     var (refinedCloud, Rref, tref) = poseRefiner.refine(
                         coarseCloud, pts2matched, Rglobal, tglobal
-                    )
-
+                    )*/
+                    val (pts1matched, pts2matched) = matches.getMatchedPoints()
                     Log.i("SfM", "Coarse and Refined cloud size: Pair $i: matches=${matches.size}, " +
                             "coarse=${coarseCloud.size}, refined=${refinedCloud.size}")
 
