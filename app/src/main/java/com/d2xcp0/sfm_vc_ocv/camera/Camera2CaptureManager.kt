@@ -269,7 +269,7 @@ class Camera2CaptureManager(
         applyStableSettings(captureRequest)
 
         // May need adjustment depending on device orientation.
-        captureRequest.set(CaptureRequest.JPEG_ORIENTATION, 90)  //90
+        captureRequest.set(CaptureRequest.JPEG_ORIENTATION, 0)  //90
 
         session.capture(
             captureRequest.build(),

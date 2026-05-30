@@ -67,6 +67,8 @@ dependencies {
     implementation libs.material
     implementation libs.androidx.constraintlayout
 
+    implementation 'androidx.exifinterface:exifinterface:1.3.6'
+
     // ---------------------------
     // OpenCV module
     // ---------------------------

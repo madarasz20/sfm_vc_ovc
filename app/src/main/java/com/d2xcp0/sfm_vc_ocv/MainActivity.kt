@@ -232,7 +232,7 @@ class MainActivity : AppCompatActivity() {
                 val rawImgs = savedImages.map { uri -> uriToMat(uri) }
 
                 rawImgs.forEachIndexed { idx, img ->
-                    Log.i("SFM_SIZE", "raw[$idx] = ${img.cols()} x ${img.rows()}")
+                    Log.i("SFM", "Raw Images size raw[$idx] = ${img.cols()} x ${img.rows()}")
                 }
 
                 val firstImg = rawImgs.first()
@@ -246,8 +246,8 @@ class MainActivity : AppCompatActivity() {
                 val K = calib.K
                 val D = calib.D
 
-                Log.i("SFM_CALIB", "Using K=${K.dump()}")
-                Log.i("SFM_CALIB", "Using D=${D.dump()}")
+                Log.i("SFM", "Camera2 calibration K=${K.dump()}")
+                Log.i("SFM", "Camera2 calibration D=${D.dump()}")
 
                 val imgs = rawImgs
 
@@ -297,7 +297,7 @@ class MainActivity : AppCompatActivity() {
                     //ez lehet nagyon lecsokkenti a parokat, miert kell
                     if (matches.size < 20) {
                         Log.w("SfM", "Skipping pair $i-${i+1}: too few matches (${matches.size})")
-                        Log.w("SfM_DIAG", "Pair $i SKIPPED: only ${matches.size} matches")
+                        Log.w("SfM", "Pair $i SKIPPED: only ${matches.size} matches")
 
                         continue
                     }
@@ -309,7 +309,7 @@ class MainActivity : AppCompatActivity() {
 
 
 
-                    Log.i("SfM_DIAG", "Pair $i pose: R=${Rrel.dump()}, t=${trel.dump()}")
+                    Log.i("SfM", "Pose estimation: Pair $i pose: R=${Rrel.dump()}, t=${trel.dump()}")
 
                     //az utolso pozt veszi csak figyelembe?
                     val Rprev = rotations.last()
@@ -324,10 +324,10 @@ class MainActivity : AppCompatActivity() {
 // After computing Rglobal, log the GLOBAL rotation angle (this shows drift)
                     val globalAngle = rotationAngleDeg(Rglobal)
 
-                    Log.i("SfM_DIAG", "Pair $i: relRot=${relAngle.toInt()}° globalRot=${globalAngle.toInt()}°")
+                    Log.i("SfM", "Global Rotation: Pair $i: relRot=${relAngle.toInt()}° globalRot=${globalAngle.toInt()}°")
 
                     if (relAngle > 25.0) {
-                        Log.w("SfM_DIAG", "Pair $i SKIPPED: relative rotation too large (${relAngle.toInt()}°)")
+                        Log.w("SfM", "Skipping if relative rotation to large : Pair $i SKIPPED: relative rotation too large (${relAngle.toInt()}°)")
                         continue
                     }
 
@@ -344,7 +344,7 @@ class MainActivity : AppCompatActivity() {
 
                     if (coarseCloud.isEmpty()) {
                         Log.w("SfM", "No 3D points for pair $i, skipping")
-                        Log.w("SfM_DIAG", "Pair $i SKIPPED: empty coarse cloud")
+                        Log.w("SfM", "CoarseCloud pair skipping: Pair $i SKIPPED: empty coarse cloud")
                         continue
                     }
 
@@ -363,7 +363,7 @@ class MainActivity : AppCompatActivity() {
                         coarseCloud, pts2matched, Rglobal, tglobal
                     )
 
-                    Log.i("SfM_DIAG", "Pair $i: matches=${matches.size}, " +
+                    Log.i("SfM", "Coarse and Refined cloud size: Pair $i: matches=${matches.size}, " +
                             "coarse=${coarseCloud.size}, refined=${refinedCloud.size}")
 
                     if (anchorCloud != null && anchorDescriptors != null) {
@@ -388,7 +388,7 @@ class MainActivity : AppCompatActivity() {
 
                     if (!translationIsValid(tref)) {
                         Log.w("SfM", "Invalid translation at frame ${i+1} → skipping")
-                        Log.w("SfM_DIAG", "Pair $i SKIPPED: invalid translation mag=" +
+                        Log.w("SfM", "Pair $i SKIPPED: invalid translation mag=" +
                                 "${Math.sqrt(tref.get(0,0)[0].pow(2) + tref.get(1,0)[0].pow(2) + tref.get(2,0)[0].pow(2))}")
                         continue
                     }
@@ -445,9 +445,9 @@ class MainActivity : AppCompatActivity() {
                 Log.i("SfM", "BA complete: ${baResult.points3D.size} points, " +
                         "final reprojection error=${baResult.finalReprojError}px")
 
-                Log.i("SfM_DIAG", "Pre-BA: ${allPoints.size} pts, " +
+                Log.i("SfM", "Pre-BA: ${allPoints.size} pts, " +
                         "observations=${observations.size}, frames=${rotations.size}")
-                Log.i("SfM_DIAG", "Post-BA: ${baResult.points3D.size} pts")
+                Log.i("SfM", "Post-BA: ${baResult.points3D.size} pts")
 
                 // Warn if BA result looks wrong
                 if (baResult.finalReprojError > 5.0) {
@@ -459,8 +459,8 @@ class MainActivity : AppCompatActivity() {
                 val cleaned    = removeStatisticalOutliers(baResult.points3D)
                 val normalized = normalizePointCloud(cleaned)
 
-                Log.i("SfM_DIAG", "Post-outlier: ${cleaned.size} pts")
-                Log.i("SfM_DIAG", "Post-normalize: ${normalized.size} pts")
+                Log.i("SfM", "Post-outlier: ${cleaned.size} pts")
+                Log.i("SfM", "Post-normalize: ${normalized.size} pts")
 
                 Log.i("SfM", "Final cloud: ${normalized.size} points " +
                         "(after outlier removal from ${baResult.points3D.size})")
@@ -600,12 +600,53 @@ class MainActivity : AppCompatActivity() {
         Toast.makeText(this, "Gallery cleared!", Toast.LENGTH_LONG).show()
     }
 
-    private fun uriToMat(uri: Uri): Mat {
+    /*private fun uriToMat(uri: Uri): Mat {
         val input = contentResolver.openInputStream(uri)
         val bytes = input!!.readBytes()
         val buf   = Mat(1, bytes.size, CvType.CV_8UC1)
         buf.put(0, 0, bytes)
         return Imgcodecs.imdecode(buf, Imgcodecs.IMREAD_COLOR)
+    }*/
+    private fun uriToMat(uri: Uri): Mat {
+        val input = contentResolver.openInputStream(uri)!!
+        val bytes = input.readBytes()
+        input.close()
+
+        val buf = Mat(1, bytes.size, CvType.CV_8UC1)
+        buf.put(0, 0, bytes)
+        val mat = Imgcodecs.imdecode(buf, Imgcodecs.IMREAD_COLOR)
+
+        // Read EXIF orientation and rotate accordingly
+        val exifInput = contentResolver.openInputStream(uri)!!
+        val exif = androidx.exifinterface.media.ExifInterface(exifInput)
+        exifInput.close()
+
+        val orientation = exif.getAttributeInt(
+            androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION,
+            androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
+        )
+
+        val rotated = when (orientation) {
+            androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90  -> {
+                val dst = Mat()
+                Core.rotate(mat, dst, Core.ROTATE_90_CLOCKWISE)
+                dst
+            }
+            androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_180 -> {
+                val dst = Mat()
+                Core.rotate(mat, dst, Core.ROTATE_180)
+                dst
+            }
+            androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270 -> {
+                val dst = Mat()
+                Core.rotate(mat, dst, Core.ROTATE_90_COUNTERCLOCKWISE)
+                dst
+            }
+            else -> mat
+        }
+
+        Log.i("SFM_SIZE", "uriToMat: ${rotated.cols()}x${rotated.rows()} orientation=$orientation")
+        return rotated
     }
 
     private fun showSfMResult() {

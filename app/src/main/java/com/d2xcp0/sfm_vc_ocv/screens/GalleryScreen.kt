@@ -16,10 +16,23 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import coil.compose.rememberAsyncImagePainter
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.graphics.Color
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import coil.transform.Transformation
+import android.graphics.Bitmap
+import android.graphics.Matrix
+
+// Display-only rotation — does not affect SfM pipeline
+class RotateTransformation(private val degrees: Float) : Transformation {
+    override val cacheKey = "rotate_$degrees"
+    override suspend fun transform(input: Bitmap, size: coil.size.Size): Bitmap {
+        val matrix = Matrix().apply { postRotate(degrees) }
+        return Bitmap.createBitmap(input, 0, 0, input.width, input.height, matrix, true)
+    }
+}
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -27,6 +40,7 @@ fun GalleryScreen(
     onBack: () -> Unit,
     images: List<Uri>
 ) {
+    val context = LocalContext.current
     var selectedImage by remember { mutableStateOf<Uri?>(null) }
 
     if (selectedImage != null) {
@@ -58,8 +72,11 @@ fun GalleryScreen(
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 items(images) { uri ->
-                    Image(
-                        painter = rememberAsyncImagePainter(uri),
+                    AsyncImage(
+                        model = ImageRequest.Builder(context)
+                            .data(uri)
+                            .transformations(RotateTransformation(90f))
+                            .build(),
                         contentDescription = null,
                         modifier = Modifier
                             .aspectRatio(1f)
