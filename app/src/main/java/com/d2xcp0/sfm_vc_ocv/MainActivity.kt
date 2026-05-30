@@ -262,7 +262,7 @@ class MainActivity : AppCompatActivity() {
                 val poseEstimator = PoseEstimator(K)
                 val triangulator  = Triangulator(K)
                 val poseRefiner   = PoseRefiner(K, D)
-                val anchorMatcher = AnchorMatcher()
+                //val anchorMatcher = AnchorMatcher()
 
                 // minden keprol jellemzo kivon
                 Log.i("SfM", "Extracting features for all frames...")
@@ -285,8 +285,8 @@ class MainActivity : AppCompatActivity() {
                 val observations = mutableMapOf<Int, MutableList<Pair<Int, Point>>>()
                 var globalPointIndex = 0
 
-                var anchorCloud: List<Point3>? = null
-                var anchorDescriptors: Mat?    = null
+                //var anchorCloud: List<Point3>? = null
+                //var anchorDescriptors: Mat?    = null
 
                 for (i in 0 until imgs.size - 1) {
 
@@ -351,11 +351,11 @@ class MainActivity : AppCompatActivity() {
                     }
 
                     //miert kell az anchorcloud mit csinal?
-                    if ((anchorCloud == null || i == bestPair) && coarseCloud.size > 30) {
+                    /*if ((anchorCloud == null || i == bestPair) && coarseCloud.size > 30) {
                         anchorCloud       = coarseCloud
                         anchorDescriptors = desc1.clone()
                         Log.i("SfM", "Anchor cloud set at pair $i (${anchorCloud!!.size} pts)")
-                    }
+                    }*/
 
                     // Get the inlier 2D points for frame i+1 before pose refinement
                     // (matches may be updated by estimatePose — capture here)
@@ -368,7 +368,7 @@ class MainActivity : AppCompatActivity() {
                     Log.i("SfM", "Coarse and Refined cloud size: Pair $i: matches=${matches.size}, " +
                             "coarse=${coarseCloud.size}, refined=${refinedCloud.size}")
 
-                    if (anchorCloud != null && anchorDescriptors != null) {
+                    /*if (anchorCloud != null && anchorDescriptors != null) {
                         val (anchor3D, anchor2D) = anchorMatcher.match3DTo2D(
                             anchorCloud!!, anchorDescriptors!!, kp2, desc2
                         )
@@ -386,7 +386,7 @@ class MainActivity : AppCompatActivity() {
                                 tref         = trefAnchor
                             }
                         }
-                    }
+                    }*/
 
                     if (!translationIsValid(tref)) {
                         Log.w("SfM", "Invalid translation at frame ${i+1} → skipping")
