@@ -28,6 +28,7 @@ import com.d2xcp0.sfm_vc_ocv.camera.Camera2CaptureManager
 import com.d2xcp0.sfm_vc_ocv.camera.CameraCalibrator
 import com.d2xcp0.sfm_vc_ocv.pointcloud.PointCloudExporter
 import com.d2xcp0.sfm_vc_ocv.pointcloud.PointCloudHolder
+import com.d2xcp0.sfm_vc_ocv.helper.TrackTriangulator
 import org.opencv.android.OpenCVLoader
 import org.opencv.core.Mat
 import org.opencv.imgcodecs.Imgcodecs
@@ -154,7 +155,7 @@ class MainActivity : AppCompatActivity() {
         } else {
             Log.w("CALIB", "No calibration found!")
         }*/
-        val K = Mat(3, 3, CvType.CV_64F)
+        /*val K = Mat(3, 3, CvType.CV_64F)
         K.put(
             0, 0,
             948.000064, 0.0,        640.0,
@@ -167,7 +168,7 @@ class MainActivity : AppCompatActivity() {
             0, 0,
             0.0, 0.0, 0.0, 0.0, 0.0
         )
-        Log.i("CALIB", "Loaded calibration: K=${K?.dump()}")
+        Log.i("CALIB", "Loaded calibration: K=${K?.dump()}")*/
     }
 
     private fun runCalibration() {
@@ -211,27 +212,14 @@ class MainActivity : AppCompatActivity() {
 
         Thread {
             try {
-                /*val calibPair = CalibrationStorage.load(this)   //ez hiba, nem ez a kalibráció kell, hanem a camera2 K, D
-                if (calibPair == null) {
-                    runOnUiThread {
-                        Toast.makeText(this, "No calibration found!", Toast.LENGTH_LONG).show()
-                    }
-                    return@Thread
-                }//idáig nem kell
-                val K = calibPair.first
-                val D = calibPair.second
-
-                //ez megint kuka sztem
-                val rawImgs     = savedImages.map { uri -> uriToMat(uri) }
-
-                val resizedImgs = rawImgs.map { img -> resizeForSfM(img) }
-                val imgs        = resizedImgs.map { img ->
-                    val und = Mat()
-                    Calib3d.undistort(img, und, K, D)
-                    und
-                }//idáig*/
-
+                //kepek:
                 val rawImgs = savedImages.map { uri -> uriToMat(uri) }
+
+                //egyelore elso 3
+                /*val rawImgs = savedImages
+                    .take(6)        //5el talan
+                    .map { uri -> uriToMat(uri) }
+                Log.i("SFM_TEST", "Two-image test enabled: rawImgs=${rawImgs.size}")*/
 
                 rawImgs.forEachIndexed { idx, img ->
                     Log.i("SFM", "Raw Images size raw[$idx] = ${img.cols()} x ${img.rows()}")
@@ -239,6 +227,7 @@ class MainActivity : AppCompatActivity() {
 
                 val firstImg = rawImgs.first()
 
+                //kamera kalibracio
                 val calib = Camera2CalibrationProvider.loadBackCameraCalibration(
                     context = this,
                     targetWidth = firstImg.cols(),
@@ -253,9 +242,6 @@ class MainActivity : AppCompatActivity() {
 
                 val imgs = rawImgs
 
-
-
-
                 //peldanyostunk OK
                 val extractor     = FeatureExtractor()
                 val matcher       = FeatureMatcher()
@@ -263,14 +249,15 @@ class MainActivity : AppCompatActivity() {
                 val triangulator  = Triangulator(K)
                 val poseRefiner   = PoseRefiner(K, D)
                 //val anchorMatcher = AnchorMatcher()
+                val trackBuilder = TrackBuilder()
 
                 // minden keprol jellemzo kivon
                 Log.i("SfM", "Extracting features for all frames...")
                 val allFeatures = imgs.map { img -> extractor.compute(img) }
 
                 //legjobb par kivalaszt Miert?
-                val bestPair = findBestInitialPair(imgs, allFeatures, matcher)
-                Log.i("SfM", "Best initial pair = $bestPair-${bestPair + 1}")
+                //val bestPair = findBestInitialPair(imgs, allFeatures, matcher)
+                //Log.i("SfM", "Best initial pair = $bestPair-${bestPair + 1}")
 
                 //identity matrix cretion
                 val rotations    = mutableListOf<Mat>()
@@ -288,6 +275,7 @@ class MainActivity : AppCompatActivity() {
                 //var anchorCloud: List<Point3>? = null
                 //var anchorDescriptors: Mat?    = null
 
+                //kepenkent parositunk
                 for (i in 0 until imgs.size - 1) {
 
                     val (kp1, desc1) = allFeatures[i]
@@ -305,10 +293,29 @@ class MainActivity : AppCompatActivity() {
                     }
 
                     //R,T eloallit
+                    //kulso kamera parameterek: relativ rotation es realtive translation
                     val (Rrel, trel) = poseEstimator.estimatePose(matches)
 
+                    Log.i(
+                        "SFM_POSE_CHAIN",
+                        "pair $i-${i+1} trel=[" +
+                                "${"%.3f".format(trel.get(0,0)[0])}, " +
+                                "${"%.3f".format(trel.get(1,0)[0])}, " +
+                                "${"%.3f".format(trel.get(2,0)[0])}]"
+                    )
 
 
+                    trackBuilder.addPairMatches(i, i + 1, matches)
+
+                    DebugVisualizer.saveMatchesImage(
+                        this,
+                        imgs[i],
+                        imgs[i + 1],
+                        kp1,
+                        kp2,
+                        matches.toListOfPairs(),
+                        "pair_${i}_${i+1}_01_pose_inliers"
+                    )
 
 
                     Log.i("SfM", "Pose estimation: Pair $i pose: R=${Rrel.dump()}, t=${trel.dump()}")
@@ -318,37 +325,36 @@ class MainActivity : AppCompatActivity() {
                     val tprev = translations.last()
 
                     val Rglobal = Mat()
-                    Core.gemm(Rprev, Rrel, 1.0, Mat(), 0.0, Rglobal)
+                    Core.gemm(Rrel, Rprev, 1.0, Mat(), 0.0, Rglobal)
 
                     // After estimatePose, log the RELATIVE rotation angle (this should be 10-15°)
                     val relAngle = rotationAngleDeg(Rrel)
 
-// After computing Rglobal, log the GLOBAL rotation angle (this shows drift)
+                    // After computing Rglobal, log the GLOBAL rotation angle (this shows drift)
                     val globalAngle = rotationAngleDeg(Rglobal)
 
                     Log.i("SfM", "Global Rotation: Pair $i: relRot=${relAngle.toInt()}° globalRot=${globalAngle.toInt()}°")
 
                     if (relAngle > 25.0) {
                         Log.w("SfM", "Skipping if relative rotation to large : Pair $i SKIPPED: relative rotation too large (${relAngle.toInt()}°)")
-                        continue
+                        break //continue
                     }
 
                     val temp = Mat()
-                    Core.gemm(Rprev, trel, 1.0, Mat(), 0.0, temp)
+                    Core.gemm(Rrel, tprev, 1.0, Mat(), 0.0, temp)
                     val tglobal = Mat()
-                    Core.add(tprev, temp, tglobal)
+                    Core.add(temp, trel, tglobal)
+
+                    Log.i(
+                        "SFM_POSE_CHAIN",
+                        "frame ${i+1} tglobal=[" +
+                                "${"%.3f".format(tglobal.get(0,0)[0])}, " +
+                                "${"%.3f".format(tglobal.get(1,0)[0])}, " +
+                                "${"%.3f".format(tglobal.get(2,0)[0])}]"
+                    )
 
                     //triangulacio globalis rotation és translation matrixxal
-                    /*val coarseCloud = triangulator.triangulate(
-                        matches, Rprev, tprev, Rglobal, tglobal
-                    )
-                    Log.i("SfM", "Pair $i coarse triangulation: ${coarseCloud.size} points")
 
-                    if (coarseCloud.isEmpty()) {
-                        Log.w("SfM", "No 3D points for pair $i, skipping")
-                        Log.w("SfM", "CoarseCloud pair skipping: Pair $i SKIPPED: empty coarse cloud")
-                        continue
-                    }*/
                     val tri = triangulator.triangulate(matches, Rprev, tprev, Rglobal, tglobal)
 
                     val coarseCloud = tri.points3D
@@ -367,56 +373,16 @@ class MainActivity : AppCompatActivity() {
                         tglobal
                     )
 
-                    /*poseRefiner.refine(
-                        coarseCloud,
-                        pts2Triangulated,
-                        Rglobal,
-                        tglobal
-                    )*/
-
-                    //miert kell az anchorcloud mit csinal?
-                    /*if ((anchorCloud == null || i == bestPair) && coarseCloud.size > 30) {
-                        anchorCloud       = coarseCloud
-                        anchorDescriptors = desc1.clone()
-                        Log.i("SfM", "Anchor cloud set at pair $i (${anchorCloud!!.size} pts)")
-                    }*/
-
-                    // Get the inlier 2D points for frame i+1 before pose refinement
-                    // (matches may be updated by estimatePose — capture here)
-                    /*val (pts1matched, pts2matched) = matches.getMatchedPoints()
-
-                    var (refinedCloud, Rref, tref) = poseRefiner.refine(
-                        coarseCloud, pts2matched, Rglobal, tglobal
-                    )*/
-                    val (pts1matched, pts2matched) = matches.getMatchedPoints()
+                    //val (pts1matched, pts2matched) = matches.getMatchedPoints()
                     Log.i("SfM", "Coarse and Refined cloud size: Pair $i: matches=${matches.size}, " +
                             "coarse=${coarseCloud.size}, refined=${refinedCloud.size}")
 
-                    /*if (anchorCloud != null && anchorDescriptors != null) {
-                        val (anchor3D, anchor2D) = anchorMatcher.match3DTo2D(
-                            anchorCloud!!, anchorDescriptors!!, kp2, desc2
-                        )
-
-                        if (anchor3D.size >= 12) {
-                            Log.i("SfM", "Pair $i anchor matches: ${anchor3D.size}")
-
-                            val (refCloudAnchor, RrefAnchor, trefAnchor) =
-                                poseRefiner.refine(anchor3D, anchor2D, Rglobal, tglobal)
-
-                            if (translationIsValid(trefAnchor)) {
-                                Log.i("SfM", "Pair $i: using anchor-based pose")
-                                refinedCloud = refCloudAnchor
-                                Rref         = RrefAnchor
-                                tref         = trefAnchor
-                            }
-                        }
-                    }*/
 
                     if (!translationIsValid(tref)) {
                         Log.w("SfM", "Invalid translation at frame ${i+1} → skipping")
                         Log.w("SfM", "Pair $i SKIPPED: invalid translation mag=" +
                                 "${Math.sqrt(tref.get(0,0)[0].pow(2) + tref.get(1,0)[0].pow(2) + tref.get(2,0)[0].pow(2))}")
-                        continue
+                        break//continue
                     }
 
                     rotations.add(Rref)
@@ -429,7 +395,7 @@ class MainActivity : AppCompatActivity() {
                     val frameIndexLeft  = i
                     val frameIndexRight = rotations.size - 1  // actual index of the new frame
 
-                    for (k in refinedCloud.indices) {
+                    /*for (k in refinedCloud.indices) {
                         val ptIdx = globalPointIndex + k
 
                         // Clamp k to valid range for both point lists
@@ -440,6 +406,38 @@ class MainActivity : AppCompatActivity() {
                         observations.getOrPut(ptIdx) { mutableListOf() }.apply {
                             add(frameIndexLeft  to obs2D1)
                             add(frameIndexRight to obs2D2)
+                        }
+                    }*/
+
+                    if (refinedCloud.size != tri.points.size) {
+                        Log.e(
+                            "SFM_BA_INPUT",
+                            "Cannot safely build observations: refinedCloud.size=${refinedCloud.size}, tri.points.size=${tri.points.size}"
+                        )
+                        break //continue
+                    }
+
+                    /*for (k in refinedCloud.indices) {
+                        if (k >= tri.points.size) {
+                            Log.e("SFM_BA_INPUT", "refinedCloud larger than tri.points at k=$k")
+                            break
+                        }
+
+                        val ptIdx = globalPointIndex + k
+                        val tp = tri.points[k]
+
+                        observations.getOrPut(ptIdx) { mutableListOf() }.apply {
+                            add(frameIndexLeft to tp.point2DLeft)
+                            add(frameIndexRight to tp.point2DRight)
+                        }
+                    }*/
+                    for (k in refinedCloud.indices) {
+                        val ptIdx = globalPointIndex + k
+                        val tp = tri.points[k]
+
+                        observations.getOrPut(ptIdx) { mutableListOf() }.apply {
+                            add(frameIndexLeft to tp.point2DLeft)
+                            add(frameIndexRight to tp.point2DRight)
                         }
                     }
 
@@ -459,16 +457,192 @@ class MainActivity : AppCompatActivity() {
                     return@Thread
                 }
 
+                Log.i("SFM_TRACK_CLOUD", "MARKER A: reached after pair loop")
+
+                trackBuilder.logStats()
+
+                val tracks = trackBuilder.getTracks()
+                val goodTracks = trackBuilder.getGoodTracks(minLength = 3)
+
+                Log.i("SFM_TRACKS", "goodTracks len>=3=${goodTracks.size}")
+                Log.i("SFM_TRACK_CLOUD", "MARKER B: before triangulation, goodTracks=${goodTracks.size}")
+
+
+                val trackTriangulator = TrackTriangulator(K)
+
+                val trackPoints = mutableListOf<Point3>()
+                val trackPointTracks = mutableListOf<FeatureTrack>()
+                var failedTracks = 0
+
+                for (track in goodTracks) {
+                    val p: Point3? = trackTriangulator.triangulateTrack(
+                        track,
+                        rotations,
+                        translations
+                    )
+
+
+                    if (p != null) {
+                        trackPoints.add(p)
+                        trackPointTracks.add(track)
+                    } else {
+                        failedTracks++
+                    }
+                }
+
+                Log.i(
+                    "SFM_TRACK_CLOUD",
+                    "triangulated track points=${trackPoints.size}/${goodTracks.size}, failed=$failedTracks"
+                )
+
+                val trackErrors = mutableListOf<Double>()
+                val keptTrackFrameHist = mutableMapOf<String, Int>()
+
+                for (idx in trackPoints.indices) {
+                    val err = computeTrackReprojectionError(
+                        point3D = trackPoints[idx],
+                        track = trackPointTracks[idx],
+                        rotations = rotations,
+                        translations = translations,
+                        K = K,
+                        D = D
+                    )
+
+                    if (err.isFinite()&& err < 5.0) {
+                        trackErrors.add(err)
+                        val obs = trackPointTracks[idx].observations.sortedBy { it.frameIndex }
+                        val key = "${obs.first().frameIndex}-${obs.last().frameIndex}"
+                        keptTrackFrameHist[key] = (keptTrackFrameHist[key] ?: 0) + 1
+                    }
+                }
+
+                if (trackErrors.isNotEmpty()) {
+                    val sorted = trackErrors.sorted()
+                    val median = sorted[sorted.size / 2]
+                    val avg = trackErrors.average()
+                    val max = sorted.last()
+
+                    Log.i(
+                        "SFM_TRACK_REPROJ",
+                        "track reproj error: count=${trackErrors.size}, " +
+                                "avg=${"%.2f".format(avg)} px, " +
+                                "median=${"%.2f".format(median)} px, " +
+                                "max=${"%.2f".format(max)} px"
+                    )
+                }
+
+                val filteredTrackPoints = mutableListOf<Point3>()
+
+                for (idx in trackPoints.indices) {
+                    val err = computeTrackReprojectionError(
+                        point3D = trackPoints[idx],
+                        track = trackPointTracks[idx],
+                        rotations = rotations,
+                        translations = translations,
+                        K = K,
+                        D = D
+                    )
+
+                    if (err < 7.0) {
+                        filteredTrackPoints.add(trackPoints[idx])
+                    }
+                }
+
+                Log.i(
+                    "SFM_TRACK_CLOUD",
+                    "filtered track cloud=${filteredTrackPoints.size}/${trackPoints.size} using reproj<8px"
+                )
+
+
+
                 // Bundle adjustment — jointly optimizes all poses and 3D points
                 val bundleAdjuster = BundleAdjuster(K, D)
-                val baResult = bundleAdjuster.adjust(
+                val useBundleAdjustment = false
+                val useTrackCloud = true
+
+                val totalObs = observations.values.sumOf { it.size }
+
+                val badPointKeys = observations.keys.count { it < 0 || it >= allPoints.size }
+
+                val badFrameObs = observations.values.flatten().count { (frameIdx, _) ->
+                    frameIdx < 0 || frameIdx >= rotations.size
+                }
+
+                val obsCounts = observations.mapValues { it.value.size }
+
+                Log.i("SFM_BA_INPUT", "allPoints=${allPoints.size}")
+                Log.i("SFM_BA_INPUT", "rotations=${rotations.size}")
+                Log.i("SFM_BA_INPUT", "translations=${translations.size}")
+                Log.i("SFM_BA_INPUT", "pointsWithObs=${observations.size}")
+                Log.i("SFM_BA_INPUT", "totalObs=$totalObs")
+
+                Log.i(
+                    "SFM_BA_INPUT",
+                    "obsPerPoint min=${obsCounts.values.minOrNull()} " +
+                            "max=${obsCounts.values.maxOrNull()} " +
+                            "avg=${obsCounts.values.average()}"
+                )
+
+                Log.i("SFM_BA_INPUT", "badPointKeys=$badPointKeys badFrameObs=$badFrameObs")
+
+                val pointsNotExactly2Obs = obsCounts.count { it.value != 2 }
+
+                Log.i("SFM_BA_INPUT", "pointsNotExactly2Obs=$pointsNotExactly2Obs")
+
+                if (badPointKeys != 0 || badFrameObs != 0 || pointsNotExactly2Obs != 0) {
+                    Log.e("SFM_BA_INPUT", "Invalid BA input graph. Aborting before BA.")
+                    runOnUiThread {
+                        Toast.makeText(this, "Invalid BA input graph — check logs", Toast.LENGTH_LONG).show()
+                    }
+                    return@Thread
+                }
+
+                /*val baResult = bundleAdjuster.adjust(
                     allPoints.toMutableList(),
                     rotations,
                     translations,
                     observations
-                )
+                )*/
 
-                Log.i("SfM", "BA complete: ${baResult.points3D.size} points, " +
+                var finalPoints: List<Point3> = emptyList()
+                var finalReprojError = -1.0
+
+                var baResult: BundleAdjuster.BAResult? = null
+
+                if (useBundleAdjustment) {
+                    val bundleAdjuster = BundleAdjuster(K, D)
+
+                    baResult = bundleAdjuster.adjust(
+                        allPoints.toMutableList(),
+                        rotations,
+                        translations,
+                        observations
+                    )
+
+                    Log.i(
+                        "SfM",
+                        "BA complete: ${baResult.points3D.size} points, " +
+                                "final reprojection error=${baResult.finalReprojError}px"
+                    )
+
+                    finalPoints = baResult.points3D
+                    finalReprojError = baResult.finalReprojError
+                } else {
+                    Log.i("SfM", "BA disabled for first validation run")
+
+                    finalPoints = if (useTrackCloud) {
+                        Log.i("SFM_TRACK_CLOUD", "Using track cloud for display: ${trackPoints.size} points")
+                        trackPoints.toList()
+                        filteredTrackPoints
+                    } else {
+                        Log.i("SFM_TRACK_CLOUD", "Using old pairwise cloud for display: ${allPoints.size} points")
+                        allPoints.toList()
+                    }
+
+                    finalReprojError = -1.0
+                }
+
+                /*Log.i("SfM", "BA complete: ${baResult.points3D.size} points, " +
                         "final reprojection error=${baResult.finalReprojError}px")
 
                 Log.i("SfM", "Pre-BA: ${allPoints.size} pts, " +
@@ -479,17 +653,23 @@ class MainActivity : AppCompatActivity() {
                 if (baResult.finalReprojError > 5.0) {
                     Log.w("SfM", "High reprojection error after BA (${baResult.finalReprojError}px) " +
                             "— consider more images with better baseline")
-                }
+                }*/
 
                 // Statistical outlier removal then normalize for display
-                val cleaned    = removeStatisticalOutliers(baResult.points3D)
+                //val cleaned = removeStatisticalOutliers(finalPoints)
+                //val normalized = normalizePointCloud(cleaned)
+                val cleaned = trackPoints//finalPoints
                 val normalized = normalizePointCloud(cleaned)
+
+                Log.i("SFM_FINAL_INPUT", "finalPoints before cleanup=${finalPoints.size}")
+                Log.i("SFM_FINAL_INPUT", "normalized=${normalized.size}")
 
                 Log.i("SfM", "Post-outlier: ${cleaned.size} pts")
                 Log.i("SfM", "Post-normalize: ${normalized.size} pts")
 
                 Log.i("SfM", "Final cloud: ${normalized.size} points " +
-                        "(after outlier removal from ${baResult.points3D.size})")
+                        "(after outlier removal from ${baResult?.points3D?.size})")
+
 
                 reconstructedCloud      = normalized
                 PointCloudHolder.points = normalized
@@ -498,10 +678,11 @@ class MainActivity : AppCompatActivity() {
                     Toast.makeText(
                         this,
                         "SfM complete: ${normalized.size} points\n" +
-                                "Reprojection error: ${"%.2f".format(baResult.finalReprojError)}px",
+                                "Reprojection error: ${"%.2f".format(baResult?.finalReprojError)}px",
                         Toast.LENGTH_LONG
                     ).show()
                 }
+
 
             } catch (e: Exception) {
                 Log.e("SfM", "SfM failed", e)
@@ -532,7 +713,7 @@ class MainActivity : AppCompatActivity() {
                 matches.toListOfPairs(), "pair_${i}_${i+1}"
             )
 
-            if (matches.size < 12) continue
+            if (matches.size < 12) break//continue
 
             val (pts1, pts2) = matches.getMatchedPoints()
             var sumDisp = 0.0
@@ -826,6 +1007,149 @@ class MainActivity : AppCompatActivity() {
             Log.e("SESSION", "Load failed", e)
             Toast.makeText(this, "Load failed: ${e.message}", Toast.LENGTH_LONG).show()
         }
+    }
+
+    private fun filterMatchesByMotionConsistency(
+        matchSet: MatchSet,
+        maxDeviationMultiplier: Double = 2.5
+    ) {
+        val (pts1, pts2) = matchSet.getMatchedPoints()
+
+        if (pts1.size < 10 || pts1.size != pts2.size) return
+
+        val dxs = pts1.indices.map { i -> pts2[i].x - pts1[i].x }
+        val dys = pts1.indices.map { i -> pts2[i].y - pts1[i].y }
+
+        fun median(values: List<Double>): Double {
+            val sorted = values.sorted()
+            return sorted[sorted.size / 2]
+        }
+
+        val medDx = median(dxs)
+        val medDy = median(dys)
+
+        val deviations = pts1.indices.map { i ->
+            val ddx = dxs[i] - medDx
+            val ddy = dys[i] - medDy
+            Math.hypot(ddx, ddy)
+        }
+
+        val medDev = median(deviations)
+        val threshold = maxOf(8.0, medDev * maxDeviationMultiplier)
+
+        val kept1 = ArrayList<Point>()
+        val kept2 = ArrayList<Point>()
+
+        for (i in pts1.indices) {
+            val ddx = dxs[i] - medDx
+            val ddy = dys[i] - medDy
+            val dev = Math.hypot(ddx, ddy)
+
+            if (dev <= threshold) {
+                kept1.add(pts1[i])
+                kept2.add(pts2[i])
+            }
+        }
+
+        Log.i(
+            "SFM_MATCH_FILTER",
+            "motion consistency: kept=${kept1.size}/${pts1.size}, " +
+                    "medDx=${"%.1f".format(medDx)}, medDy=${"%.1f".format(medDy)}, " +
+                    "threshold=${"%.1f".format(threshold)}"
+        )
+
+        matchSet.replaceMatches(kept1, kept2)
+    }
+    private fun filterMatchesByVerticalDisparity(
+        matchSet: MatchSet,
+        maxDyPx: Double = 8.0
+    ) {
+        val (pts1, pts2) = matchSet.getMatchedPoints()
+
+        if (pts1.size != pts2.size) return
+
+        val kept1 = ArrayList<Point>()
+        val kept2 = ArrayList<Point>()
+
+        for (i in pts1.indices) {
+            val dy = Math.abs(pts2[i].y - pts1[i].y)
+
+            if (dy <= maxDyPx) {
+                kept1.add(pts1[i])
+                kept2.add(pts2[i])
+            }
+        }
+
+        Log.i(
+            "SFM_MATCH_FILTER",
+            "vertical disparity: kept=${kept1.size}/${pts1.size}, maxDy=$maxDyPx"
+        )
+
+        matchSet.replaceMatches(kept1, kept2)
+    }
+
+    private fun computeTrackReprojectionError(
+        point3D: Point3,
+        track: FeatureTrack,
+        rotations: List<Mat>,
+        translations: List<Mat>,
+        K: Mat,
+        D: Mat
+    ): Double {
+        val errors = mutableListOf<Double>()
+
+        for (obs in track.observations) {
+            val frameIdx = obs.frameIndex
+
+            if (frameIdx !in rotations.indices || frameIdx !in translations.indices) {
+                continue
+            }
+
+            val R = rotations[frameIdx]
+            val t = translations[frameIdx]
+
+            if (R.empty() || t.empty()) continue
+
+            val rvec = Mat()
+            val objectPoints = MatOfPoint3f(point3D)
+            val projected = MatOfPoint2f()
+
+            val distCoeffs = MatOfDouble()
+            D.convertTo(distCoeffs, CvType.CV_64F)
+
+            try {
+                Calib3d.Rodrigues(R, rvec)
+
+                Calib3d.projectPoints(
+                    objectPoints,
+                    rvec,
+                    t,
+                    K,
+                    distCoeffs,
+                    projected
+                )
+
+                val p = projected.toArray().firstOrNull() ?: continue
+
+                val dx = p.x - obs.point2D.x
+                val dy = p.y - obs.point2D.y
+                val err = Math.hypot(dx, dy)
+
+                if (err.isFinite()) {
+                    errors.add(err)
+                }
+            } catch (e: Exception) {
+                Log.w("SFM_TRACK_REPROJ", "Projection failed: ${e.message}")
+            } finally {
+                rvec.release()
+                objectPoints.release()
+                projected.release()
+            }
+        }
+
+        if (errors.isEmpty()) return Double.MAX_VALUE
+
+        return errors.average()
     }
 
 }

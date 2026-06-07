@@ -185,8 +185,17 @@ class Triangulator(private val K: Mat) {
                 "(behind=$rejectedBehind, depth=$rejectedDepth, " +
                 "angle=$rejectedAngle, invalid=$rejectedInvalid)")
 
-        val filtered = filterByMAD(cloud)
-        Log.i(TAG, "After MAD filter: ${filtered.size}/${cloud.size}")
+        val reprojFiltered = cloud.filter { tp ->
+            val e1 = reprojectionError(tp.point3D, tp.point2DLeft, R1d, t1d)
+            val e2 = reprojectionError(tp.point3D, tp.point2DRight, R2d, t2d)
+
+            e1.isFinite() && e2.isFinite() && e1 < 4.0 && e2 < 4.0
+        }
+
+        Log.i(TAG, "After reprojection filter: ${reprojFiltered.size}/${cloud.size}")
+
+        val filtered = filterByDistanceMAD(cloud)
+        Log.i(TAG, "After distance MAD filter: ${filtered.size}/${cloud.size}")
 
         Log.i(
             TAG,
@@ -261,12 +270,69 @@ class Triangulator(private val K: Mat) {
         }
     }
 
+    private fun filterByDistanceMAD(points: List<TriangulatedPoint>): List<TriangulatedPoint> {
+        if (points.size < 10) return points
+
+        val cx = points.map { it.point3D.x }.average()
+        val cy = points.map { it.point3D.y }.average()
+        val cz = points.map { it.point3D.z }.average()
+
+        val distances = points.map {
+            val dx = it.point3D.x - cx
+            val dy = it.point3D.y - cy
+            val dz = it.point3D.z - cz
+            Math.sqrt(dx * dx + dy * dy + dz * dz)
+        }
+
+        val sorted = distances.sorted()
+        val median = sorted[sorted.size / 2]
+
+        val deviations = distances.map { Math.abs(it - median) }.sorted()
+        val mad = deviations[deviations.size / 2]
+
+        if (mad < 1e-9) return points
+
+        val threshold = median + 3.0 * (mad / 0.6745)
+
+        return points.filterIndexed { idx, _ ->
+            distances[idx] <= threshold
+        }
+    }
+
     private fun getMatValue(mat: Mat, row: Int, col: Int): Double? {
         if (mat.empty()) return null
         if (row < 0 || row >= mat.rows() || col < 0 || col >= mat.cols()) return null
         val v = mat.get(row, col) ?: return null
         if (v.isEmpty()) return null
         return v[0]
+    }
+
+    private fun reprojectionError(
+        point: Point3,
+        observed: Point,
+        R: Mat,
+        t: Mat
+    ): Double {
+        val objectPoints = MatOfPoint3f(point)
+        val imagePoints = MatOfPoint2f()
+
+        val rvec = Mat()
+        Calib3d.Rodrigues(R, rvec)
+
+        Calib3d.projectPoints(
+            objectPoints,
+            rvec,
+            t,
+            K,
+            MatOfDouble(0.0, 0.0, 0.0, 0.0, 0.0),
+            imagePoints
+        )
+
+        val projected = imagePoints.toArray()[0]
+        val dx = projected.x - observed.x
+        val dy = projected.y - observed.y
+
+        return Math.hypot(dx, dy)
     }
 
 }

@@ -14,6 +14,8 @@ class PoseEstimator(private val K: Mat) {
 
     fun estimatePose(matchSet: MatchSet): Pair<Mat, Mat> {
 
+        val originalIndexedMatches = matchSet.getIndexedMatches()
+
         val (pts1List, pts2List) = matchSet.getMatchedPoints()
 
         if (pts1List.size < MIN_INLIERS) {
@@ -27,12 +29,16 @@ class PoseEstimator(private val K: Mat) {
         // FIX 1: Threshold at 2.0px — 1.0px was too strict for a handheld
         // phone camera with residual distortion and JPEG compression artifacts.
         // 2.0px is the practical sweet spot for mobile SfM.
+
+        val eMask = Mat()
+
         val E = Calib3d.findEssentialMat(
             pts1, pts2, K,
-            Calib3d.RANSAC,
+            Calib3d.RANSAC,//LMEDS
             0.999,
-            2.0,
-            1000
+            1.0,        //2.0
+            1000,
+            eMask
         )
 
         // FIX 2: Check E matrix shape BEFORE the empty check.
@@ -54,58 +60,98 @@ class PoseEstimator(private val K: Mat) {
 
         val R = Mat()
         val t = Mat()
-        val poseMask = Mat()
+        val poseMask = eMask.clone()
 
-        val recovered = Calib3d.recoverPose(E33, pts1, pts2, K, R, t, poseMask)
+        val recovered = Calib3d.recoverPose(
+            E33,
+            pts1,
+            pts2,
+            K,
+            R,
+            t,
+            poseMask
+        )
 
+        val eInliers = Core.countNonZero(eMask)
+
+        Log.i(TAG, "findEssentialMat inliers: $eInliers / ${pts1List.size}")
         Log.i(TAG, "recoverPose inliers: $recovered / ${pts1List.size}")
+        Log.i(
+            TAG,
+            "recoverPose output: " +
+                    "R=${R.rows()}x${R.cols()} empty=${R.empty()}, " +
+                    "t=${t.rows()}x${t.cols()} empty=${t.empty()}"
+        )
 
         if (recovered < MIN_INLIERS) {
             Log.w(TAG, "recoverPose found too few valid inliers: $recovered")
             return identity()
         }
 
-        // Filter matchSet down to only pose-consistent inliers
-        val final1 = ArrayList<Point>()
-        val final2 = ArrayList<Point>()
+        if (
+            R.empty() || t.empty() ||
+            R.rows() != 3 || R.cols() != 3 ||
+            t.rows() != 3 || t.cols() != 1
+        ) {
+            Log.w(
+                TAG,
+                "recoverPose returned invalid pose: " +
+                        "R=${R.rows()}x${R.cols()} empty=${R.empty()}, " +
+                        "t=${t.rows()}x${t.cols()} empty=${t.empty()}"
+            )
+            return identity()
+        }
 
-        val nMask = minOf(pts1List.size, pts2List.size, poseMask.rows())
+        val finalIndexed = ArrayList<IndexedMatch>()
+
+        val nMask = minOf(originalIndexedMatches.size, poseMask.rows())
+
         for (i in 0 until nMask) {
             val mv = poseMask.get(i, 0)
+
             if (mv != null && mv.isNotEmpty() && mv[0] != 0.0) {
-                final1.add(pts1List[i])
-                final2.add(pts2List[i])
+                finalIndexed.add(originalIndexedMatches[i])
             }
         }
 
-        if (final1.size < MIN_INLIERS) {
-            Log.w(TAG, "Too few pose-consistent inliers after recoverPose: ${final1.size}")
+        if (finalIndexed.size < MIN_INLIERS) {
+            Log.w(TAG, "Too few pose-consistent inliers after recoverPose: ${finalIndexed.size}")
             return identity()
         }
 
-        matchSet.replaceMatches(final1, final2)
+        val inlierRatio = finalIndexed.size.toFloat() / originalIndexedMatches.size.toFloat()
 
-        // FIX 3: Log inlier ratio — useful for diagnosing match quality.
-        // If this is consistently below 30%, the feature matcher is the bottleneck.
-        val inlierRatio = final1.size.toFloat() / pts1List.size
-        Log.i(TAG, "Pose estimated — matches: ${pts1List.size}, " +
-                "inliers: ${final1.size}, ratio: ${"%.2f".format(inlierRatio)}")
-
-        if (inlierRatio < 0.2f) {
-            Log.w(TAG, "Low inlier ratio (${"%.2f".format(inlierRatio)}) " +
-                    "— consider checking image overlap or exposure consistency")
-        }
-
-        val tMag = Math.sqrt(
-            t.get(0,0)[0].pow(2) +
-                    t.get(1,0)[0].pow(2) +
-                    t.get(2,0)[0].pow(2)
+        Log.i(
+            TAG,
+            "Pose estimated — matches: ${originalIndexedMatches.size}, " +
+                    "inliers: ${finalIndexed.size}, ratio: ${"%.2f".format(inlierRatio)}"
         )
-        if (tMag < 0.001) {
-            Log.w(TAG, "recoverPose returned near-zero translation — returning identity fallback")
+
+        matchSet.replaceIndexedMatches(finalIndexed)
+
+        if (inlierRatio < 0.35f) {
+            Log.w(
+                TAG,
+                "Low inlier ratio (${"%.2f".format(inlierRatio)}) " +
+                        "— consider checking image overlap or exposure consistency"
+            )
+        }
+
+        val tx = t.get(0, 0)?.getOrNull(0)
+        val ty = t.get(1, 0)?.getOrNull(0)
+        val tz = t.get(2, 0)?.getOrNull(0)
+
+        if (tx == null || ty == null || tz == null) {
+            Log.w(TAG, "recoverPose returned unreadable translation values")
             return identity()
         }
 
+        val tMag = Math.sqrt(tx.pow(2) + ty.pow(2) + tz.pow(2))
+
+        if (!tMag.isFinite() || tMag < 0.001) {
+            Log.w(TAG, "recoverPose returned bad translation magnitude=$tMag → returning identity fallback")
+            return identity()
+        }
 
         return R to t
     }
@@ -159,4 +205,6 @@ class PoseEstimator(private val K: Mat) {
         }
         return count
     }
+
+
 }
