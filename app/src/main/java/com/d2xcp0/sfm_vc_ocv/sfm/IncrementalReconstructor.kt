@@ -18,7 +18,10 @@ import kotlin.math.sqrt
  *
  * Feltetelezi, hogy a track 2D pontjai torzitasmentesek (pinhole, D = 0).
  */
-class IncrementalReconstructor(private val K: Mat) {
+class IncrementalReconstructor(
+    private val K: Mat,
+    private val useBundleAdjustment: Boolean = true
+) {
 
     companion object {
         private const val TAG = "SFM_INCREMENTAL"
@@ -28,16 +31,30 @@ class IncrementalReconstructor(private val K: Mat) {
         private const val PNP_ITERATIONS = 500
         private const val MAX_REPROJ_PX = 2.5
         private const val MIN_ANGLE_DEG = 2.0
+
+        // BA: rovid futas minden uj kep utan, hosszabb a vegen
+        private const val LOCAL_BA_ITERATIONS = 5
+        private const val FINAL_BA_ITERATIONS = 30
+        // BA utan minden nezetben ennel kisebb hiba kell
+        private const val FINAL_MAX_REPROJ_PX = 3.0
     }
 
     data class Result(
         val points: List<Point3>,
         val pointTracks: List<FeatureTrack>,
         val rotations: List<Mat?>,      // null = a frame nem regisztralodott
-        val translations: List<Mat?>
+        val translations: List<Mat?>,
+        val finalBA: SparseBundleAdjuster.Stats?
     ) {
         val registeredFrames: Int get() = rotations.count { it != null }
+
+        // Csak azok a pontok, amelyeket legalabb minViews regisztralt kep lat
+        fun cloud(minViews: Int): List<Point3> = points.filterIndexed { i, _ ->
+            pointTracks[i].observations.count { rotations.getOrNull(it.frameIndex) != null } >= minViews
+        }
     }
+
+    private val bundleAdjuster = SparseBundleAdjuster(K)
 
     private val fx = K.get(0, 0)[0]
     private val fy = K.get(1, 1)[0]
@@ -78,11 +95,45 @@ class IncrementalReconstructor(private val K: Mat) {
 
             val before = points.size
             triangulateNewTracks(tracks, rotations, translations, points)
-            val removed = filterPoints(tracks, rotations, translations, points)
+            var removed = filterPoints(tracks, rotations, translations, points)
             Log.i(
                 TAG,
                 "frame $f registered: +${points.size - before + removed} new, -$removed bad, total=${points.size}"
             )
+
+            // Lokalis BA: a hiba ne halmozodjon a kovetkezo kepek regisztraciojaig
+            if (useBundleAdjustment && rotations.count { it != null } >= 3) {
+                bundleAdjuster.adjust(
+                    rotations, translations, points, tracks,
+                    fixedFrame = initFrameA, scaleFrame = initFrameB,
+                    maxIterations = LOCAL_BA_ITERATIONS
+                )
+                removed = filterPoints(tracks, rotations, translations, points)
+                if (removed > 0) Log.i(TAG, "frame $f: -$removed points after local BA")
+            }
+        }
+
+        var finalBA: SparseBundleAdjuster.Stats? = null
+        if (useBundleAdjustment) {
+            // Az eddig nem regisztralt kepeket meg egyszer megprobaljuk a finomitott pontokkal
+            for (f in 0 until numFrames) {
+                if (rotations[f] != null) continue
+                val neighbour = (1 until numFrames).flatMap { listOf(f - it, f + it) }
+                    .firstOrNull { it in 0 until numFrames && rotations[it] != null } ?: continue
+                if (registerFrame(f, neighbour, tracks, points, rotations, translations)) {
+                    Log.i(TAG, "frame $f registered on retry")
+                    triangulateNewTracks(tracks, rotations, translations, points)
+                    filterPoints(tracks, rotations, translations, points)
+                }
+            }
+
+            finalBA = bundleAdjuster.adjust(
+                rotations, translations, points, tracks,
+                fixedFrame = initFrameA, scaleFrame = initFrameB,
+                maxIterations = FINAL_BA_ITERATIONS
+            )
+            val removed = removeAboveMaxError(tracks, rotations, translations, points, FINAL_MAX_REPROJ_PX)
+            Log.i(TAG, "final BA: -$removed points with any view error > $FINAL_MAX_REPROJ_PX px")
         }
 
         val byId = tracks.associateBy { it.id }
@@ -91,10 +142,29 @@ class IncrementalReconstructor(private val K: Mat) {
             points = ids.map { points.getValue(it) },
             pointTracks = ids.map { byId.getValue(it) },
             rotations = rotations.toList(),
-            translations = translations.toList()
+            translations = translations.toList(),
+            finalBA = finalBA
         )
         Log.i(TAG, "done: registered ${result.registeredFrames}/$numFrames frames, ${result.points.size} points")
         return result
+    }
+
+    // Minden nezetben maxPx alatti hiba kell (a filterPoints atlagot nez)
+    private fun removeAboveMaxError(
+        tracks: List<FeatureTrack>,
+        rotations: Array<Mat?>,
+        translations: Array<Mat?>,
+        points: MutableMap<Int, Point3>,
+        maxPx: Double
+    ): Int {
+        val byId = tracks.associateBy { it.id }
+        val bad = points.filter { (id, p) ->
+            byId.getValue(id).observations
+                .filter { rotations.getOrNull(it.frameIndex) != null }
+                .any { reprojError(p, it, rotations, translations) > maxPx }
+        }.keys
+        bad.forEach { points.remove(it) }
+        return bad.size
     }
 
     private fun registerFrame(

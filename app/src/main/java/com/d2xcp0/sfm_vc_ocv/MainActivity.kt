@@ -296,6 +296,10 @@ class MainActivity : AppCompatActivity() {
                 // true: PnP alapu inkrementalis regisztracio (IncrementalReconstructor)
                 // false: regi paronkenti pozlancolas (osszehasonlitashoz megtartva)
                 val useIncremental = true
+                // true: SparseBundleAdjuster az inkrementalis regisztracio kozben es vegen,
+                // a megjelenitett felho a BA-val finomitott pontokbol all
+                val useIncrementalBA = true
+                var incrementalCloud: List<Point3>? = null
                 // parok relativ pozai az init par valasztasahoz: i -> (R, t, inlierek, rel. szog)
                 data class PairPose(val R: Mat, val t: Mat, val inliers: Int, val angle: Double)
                 val pairPoses = mutableMapOf<Int, PairPose>()
@@ -523,7 +527,7 @@ class MainActivity : AppCompatActivity() {
                     val init = initEntry.value
                     Log.i("SFM_INCREMENTAL", "init pair $initA-${initA + 1}: inliers=${init.inliers} relRot=${"%.1f".format(init.angle)}°")
 
-                    val incremental = IncrementalReconstructor(K).reconstruct(
+                    val incremental = IncrementalReconstructor(K, useIncrementalBA).reconstruct(
                         numFrames = imgs.size,
                         tracks = trackBuilder.getTracks(),
                         initFrameA = initA,
@@ -546,6 +550,18 @@ class MainActivity : AppCompatActivity() {
                         "poses for final cloud: registered=${incremental.registeredFrames}/${imgs.size}, " +
                                 "unregistered=${(0 until imgs.size).filter { incremental.rotations[it] == null }}"
                     )
+
+                    // BA utan a finomitott pontok kozvetlenul a megjelenitett felho;
+                    // linearis ujratriangulalas elvesztene a BA javitasat.
+                    // Legalabb 3 kep: ugyanaz a kuszob, mint a track felhonel.
+                    if (useIncrementalBA) {
+                        incrementalCloud = incremental.cloud(minViews = 3)
+                        Log.i(
+                            "SFM_INCREMENTAL",
+                            "BA cloud: ${incrementalCloud!!.size} points (>=3 views) of ${incremental.points.size}, " +
+                                    "final BA rms=${incremental.finalBA?.finalRms?.let { "%.3f".format(it) }} px"
+                        )
+                    }
                 }
 
                 val tracks = trackBuilder.getTracks()
@@ -728,6 +744,12 @@ class MainActivity : AppCompatActivity() {
                     }
 
                     finalReprojError = -1.0
+                }
+
+                incrementalCloud?.let {
+                    Log.i("SFM_TRACK_CLOUD", "Using BA cloud for display: ${it.size} points " +
+                            "(track cloud would be ${filteredTrackPoints.size})")
+                    finalPoints = it
                 }
 
                 /*Log.i("SfM", "BA complete: ${baResult.points3D.size} points, " +
