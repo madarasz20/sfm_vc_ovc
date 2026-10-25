@@ -64,6 +64,9 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         init { System.loadLibrary("native-lib") }
+
+        // Ablakos parositas merete: i-(i+1) ... i-(i+MATCH_WINDOW). 1 = csak szomszedos parok
+        private const val MATCH_WINDOW = 3
     }
     external fun nativeTest(): String
 
@@ -496,6 +499,31 @@ class MainActivity : AppCompatActivity() {
 
                 Log.i("SfM", "Sequential SfM done. Raw points: ${allPoints.size}, " +
                         "frames: ${rotations.size}, observations: ${observations.size}")
+
+                // Ablakos parositas: i-(i+2) es i-(i+3) parok is a trackekbe kerulnek.
+                // Hosszabb trackek (tobb 2D-3D par a PnP-hez), nagyobb bazis a triangulaciohoz,
+                // es egy kiesett szomszedos par (pl. 12-13) is athidalhato.
+                if (useIncremental) {
+                    for (gap in 2..MATCH_WINDOW) {
+                        for (i in 0 until imgs.size - gap) {
+                            val (kp1, desc1) = allFeatures[i]
+                            val (kp2, desc2) = allFeatures[i + gap]
+                            val m = matcher.match(desc1, desc2, kp1, kp2)
+                            if (m.size < 20) {
+                                Log.i("SfM", "Window pair $i-${i + gap}: only ${m.size} matches, skipped")
+                                continue
+                            }
+                            // estimatePose RANSAC-cal szuri a matcheket (csak inlierek maradnak)
+                            val (_, t) = poseEstimator.estimatePose(m)
+                            if (isIdentityFallback(t)) {
+                                Log.i("SfM", "Window pair $i-${i + gap}: pose failed, skipped")
+                                continue
+                            }
+                            trackBuilder.addPairMatches(i, i + gap, m)
+                            Log.i("SfM", "Window pair $i-${i + gap}: ${m.size} inliers added to tracks")
+                        }
+                    }
+                }
 
                 if (!useIncremental && allPoints.isEmpty()) {
                     runOnUiThread {

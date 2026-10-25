@@ -28,10 +28,8 @@ class TrackBuilder {
             )
         }
 
-        Log.i(
-            TAG,
-            "addPairMatches $frameLeft-$frameRight indexed=${indexed.size}/${matches.size}"
-        )
+        var merged = 0
+        var conflicts = 0
 
         for (m in indexed) {
             val leftKey = frameLeft to m.idx1
@@ -84,20 +82,38 @@ class TrackBuilder {
                 }
 
                 else -> {
-                    // Collision: two existing tracks claim this match.
-                    // For first version, skip. Do not merge yet.
-                    Log.w(
-                        TAG,
-                        "Track collision on pair $frameLeft-$frameRight: " +
-                                "$leftTrackId vs $rightTrackId"
-                    )
+                    // Ket kulon track ugyanazt a pontot jelenti (pl. az i-(i+2) parositas
+                    // osszekot ket lancot). Ha nincs kozos kepuk, osszeolvasztjuk oket;
+                    // ha van, az ellentmondas (egy kepen ket kulon kulcspont) -> kihagyjuk.
+                    val keep = tracks[leftTrackId!!]
+                    val drop = tracks[rightTrackId!!]
+                    val keepFrames = keep.observations.map { it.frameIndex }.toSet()
+
+                    if (drop.observations.none { it.frameIndex in keepFrames }) {
+                        for (o in drop.observations) {
+                            keep.observations.add(o)
+                            obsToTrack[o.frameIndex to o.keypointIndex] = keep.id
+                        }
+                        drop.observations.clear()
+                        merged++
+                    } else {
+                        conflicts++
+                    }
                 }
             }
         }
+
+        Log.i(
+            TAG,
+            "addPairMatches $frameLeft-$frameRight indexed=${indexed.size}/${matches.size} " +
+                    "merged=$merged conflicts=$conflicts"
+        )
     }
 
     fun getTracks(): List<FeatureTrack> {
+        // Az osszeolvasztott (kiurult) trackek kimaradnak
         return tracks
+            .filter { it.observations.isNotEmpty() }
             .map { track ->
                 track.copy(
                     observations = track.observations
@@ -116,7 +132,8 @@ class TrackBuilder {
     }
 
     fun logStats() {
-        val hist = tracks
+        val live = tracks.filter { it.observations.isNotEmpty() }
+        val hist = live
             .groupBy { it.observations.size }
             .mapValues { it.value.size }
             .toSortedMap()
@@ -124,7 +141,7 @@ class TrackBuilder {
         val good3 = getGoodTracks(3).size
         val good4 = getGoodTracks(4).size
 
-        Log.i(TAG, "tracks total=${tracks.size}")
+        Log.i(TAG, "tracks total=${live.size} (merged away=${tracks.size - live.size})")
         Log.i(TAG, "track length histogram=$hist")
         Log.i(TAG, "tracks len>=3=$good3")
         Log.i(TAG, "tracks len>=4=$good4")
