@@ -67,6 +67,9 @@ class MainActivity : AppCompatActivity() {
 
         // Ablakos parositas merete: i-(i+1) ... i-(i+MATCH_WINDOW). 1 = csak szomszedos parok
         private const val MATCH_WINDOW = 3
+
+        // Jellemzo tipus: ORB (regi), SIFT vagy ROOT_SIFT
+        private val FEATURE_TYPE = FeatureType.ROOT_SIFT
     }
     external fun nativeTest(): String
 
@@ -260,7 +263,8 @@ class MainActivity : AppCompatActivity() {
                 val imgs = rawImgs
 
                 //peldanyostunk OK
-                val extractor     = FeatureExtractor()
+                val extractor     = FeatureExtractor(FEATURE_TYPE)
+                Log.i("SfM", "Feature type: $FEATURE_TYPE")
                 val matcher       = FeatureMatcher()
                 val poseEstimator = PoseEstimator(K)
                 val triangulator  = Triangulator(K)

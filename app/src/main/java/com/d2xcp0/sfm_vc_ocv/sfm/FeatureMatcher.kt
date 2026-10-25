@@ -3,6 +3,7 @@ package com.d2xcp0.sfm_vc_ocv.sfm
 import android.util.Log
 import org.opencv.core.*
 import org.opencv.features2d.BFMatcher
+import org.opencv.features2d.FlannBasedMatcher
 import org.opencv.core.MatOfKeyPoint
 import org.opencv.core.MatOfDMatch
 
@@ -15,9 +16,14 @@ class FeatureMatcher {
     private val matcher = BFMatcher.create(Core.NORM_HAMMING, false)
     // crossCheck = true ha nincs knn
 
+    // float (SIFT / RootSIFT) descriptorokhoz: FLANN k-d fa, gyorsabb mint a brute-force L2
+    private val floatMatcher = FlannBasedMatcher.create()
+
     private val  RATIO = 0.80f      //lowe
     private val MIN_GAP = 5.0f      //best match has to be at least X bits better
     private val MAX_DISTANCE = 65.0f    //Highest acceptable Hamming distance
+
+    private val FLOAT_RATIO = 0.80f  // Lowe ratio SIFT-hez
 
 
     fun match(
@@ -38,6 +44,10 @@ class FeatureMatcher {
         if (desc1.empty() || desc2.empty()) {
             Log.w(TAG, "Empty descriptors, skipping match.")
             return matchSet
+        }
+
+        if (desc1.type() == CvType.CV_32F) {
+            return matchFloat(desc1, desc2, matchSet)
         }
 
         /*val matches = MatOfDMatch()
@@ -147,6 +157,38 @@ class FeatureMatcher {
             matchSet.addMatch(gm.queryIdx, gm.trainIdx)
         }*/
 
+        return matchSet
+    }
+
+    // SIFT / RootSIFT: FLANN knn (k=2) + Lowe ratio, majd egyertelmuseg a masodik kepen:
+    // ha tobb pont ugyanarra a kulcspontra mutat, csak a legkisebb tavolsagu marad
+    // (kulonben a TrackBuilder-ben utkozest okozna)
+    private fun matchFloat(desc1: Mat, desc2: Mat, matchSet: MatchSet): MatchSet {
+        val knnMatches = ArrayList<MatOfDMatch>()
+        floatMatcher.knnMatch(desc1, desc2, knnMatches, 2)
+
+        val bestByTrain = HashMap<Int, DMatch>()
+        var ratioPassed = 0
+
+        for (matMatch in knnMatches) {
+            val m = matMatch.toArray()
+            if (m.size < 2) continue
+            val best = m[0]
+            if (best.distance < FLOAT_RATIO * m[1].distance) {
+                ratioPassed++
+                val prev = bestByTrain[best.trainIdx]
+                if (prev == null || best.distance < prev.distance) bestByTrain[best.trainIdx] = best
+            }
+        }
+
+        for (gm in bestByTrain.values) {
+            matchSet.addMatch(gm.queryIdx, gm.trainIdx)
+        }
+
+        Log.i(
+            "SFM_MATCH",
+            "float knn=${knnMatches.size}, ratio=$ratioPassed, unique=${bestByTrain.size}"
+        )
         return matchSet
     }
 }
