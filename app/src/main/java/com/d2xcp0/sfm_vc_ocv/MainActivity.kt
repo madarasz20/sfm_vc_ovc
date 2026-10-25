@@ -24,6 +24,7 @@ import java.text.SimpleDateFormat
 import java.util.*
 import android.util.Log
 import com.d2xcp0.sfm_vc_ocv.camera.Camera2CalibrationProvider
+import com.d2xcp0.sfm_vc_ocv.camera.ExifCalibrationProvider
 import com.d2xcp0.sfm_vc_ocv.camera.Camera2CaptureManager
 import com.d2xcp0.sfm_vc_ocv.camera.CameraCalibrator
 import com.d2xcp0.sfm_vc_ocv.pointcloud.PointCloudExporter
@@ -46,6 +47,15 @@ class MainActivity : AppCompatActivity() {
     private val CAMERA_PERMISSION_CODE = 100
     private var latestPhotoUri: Uri? = null
     private val savedImages = mutableStateListOf<Uri>()
+
+    // Igaz, ha minden kep a loadTestImages() altal masolt teszt kepek kozul valo
+    private val usingTestImages: Boolean
+        get() {
+            val testDir = File(cacheDir, "test_images").absolutePath
+            return savedImages.isNotEmpty() && savedImages.all {
+                it.scheme == "file" && it.path?.startsWith(testDir) == true
+            }
+        }
     private var reconstructedCloud: List<Point3>? = null
     private var K: Mat? = null
     private var D: Mat? = null
@@ -121,54 +131,18 @@ class MainActivity : AppCompatActivity() {
                             }
                         },
 
-                        onTestImagePaths = { testImagePaths() },
                         onRunSfM = { runSfM() },
                         onShowSfMResult = { showSfMResult() },
                         onClearGallery = { clearGallery() },
                         onExportPointCloud = { exportPointCloud() },
-                        onCalibrate = { runCalibration() },
                         onSaveSession = {saveSession()},
-                        onLoadSession = {loadSession()}
+                        onLoadSession = {loadSession()},
+                        onLoadTestImages = {loadTestImages()}
                     )
                 }
             }
         }
 
-        /*val loaded = CalibrationStorage.load(this)
-        if (loaded != null) {
-            //K = loaded.first
-            //D = loaded.second
-            val K = Mat(3, 3, CvType.CV_64F)
-            K.put(
-                0, 0,
-                948.000064, 0.0,        640.0,
-                0.0,        948.000064, 480.0,
-                0.0,        0.0,        1.0
-            )
-
-            val D = Mat(1, 5, CvType.CV_64F)
-            D.put(
-                0, 0,
-                0.0, 0.0, 0.0, 0.0, 0.0
-            )
-            Log.i("CALIB", "Loaded calibration: K=${K?.dump()}")
-        } else {
-            Log.w("CALIB", "No calibration found!")
-        }*/
-        /*val K = Mat(3, 3, CvType.CV_64F)
-        K.put(
-            0, 0,
-            948.000064, 0.0,        640.0,
-            0.0,        948.000064, 480.0,
-            0.0,        0.0,        1.0
-        )
-
-        val D = Mat(1, 5, CvType.CV_64F)
-        D.put(
-            0, 0,
-            0.0, 0.0, 0.0, 0.0, 0.0
-        )
-        Log.i("CALIB", "Loaded calibration: K=${K?.dump()}")*/
     }
 
     private fun runCalibration() {
@@ -228,17 +202,32 @@ class MainActivity : AppCompatActivity() {
                 val firstImg = rawImgs.first()
 
                 //kamera kalibracio
-                val calib = Camera2CalibrationProvider.loadBackCameraCalibration(
-                    context = this,
-                    targetWidth = firstImg.cols(),
-                    targetHeight = firstImg.rows()
-                )
+                // Teszt kepeknel mindig EXIF: a kepeket nem feltetlenul ez a keszulek keszitette.
+                // Egyebkent Camera2, es ha a keszulek nem adja meg, EXIF fallback.
+                val calib = if (usingTestImages) {
+                    ExifCalibrationProvider.loadFromImage(
+                        this, savedImages.first(), firstImg.cols(), firstImg.rows()
+                    )
+                } else {
+                    try {
+                        Camera2CalibrationProvider.loadBackCameraCalibration(
+                            context = this,
+                            targetWidth = firstImg.cols(),
+                            targetHeight = firstImg.rows()
+                        )
+                    } catch (e: IllegalStateException) {
+                        Log.w("SFM", "Camera2 calibration unavailable (${e.message}) → EXIF fallback")
+                        ExifCalibrationProvider.loadFromImage(
+                            this, savedImages.first(), firstImg.cols(), firstImg.rows()
+                        )
+                    }
+                }
 
                 val K = calib.K
                 val D = calib.D
 
-                Log.i("SFM", "Camera2 calibration K=${K.dump()}")
-                Log.i("SFM", "Camera2 calibration D=${D.dump()}")
+                Log.i("SFM", "Calibration source=${calib.cameraId} K=${K.dump()}")
+                Log.i("SFM", "Calibration source=${calib.cameraId} D=${D.dump()}")
 
                 val imgs = rawImgs
 
@@ -289,7 +278,9 @@ class MainActivity : AppCompatActivity() {
                         Log.w("SfM", "Skipping pair $i-${i+1}: too few matches (${matches.size})")
                         Log.w("SfM", "Pair $i SKIPPED: only ${matches.size} matches")
 
-                        continue
+                        // A lancolas nem tudja athidalni a hianyzo part: continue eseten
+                        // rotations[k] mar nem a k. framehez tartozna
+                        break
                     }
 
                     //R,T eloallit
@@ -304,6 +295,13 @@ class MainActivity : AppCompatActivity() {
                                 "${"%.3f".format(trel.get(2,0)[0])}]"
                     )
 
+
+                    // Sikertelen pozbecsles eseten identity jon vissza, es a matchek
+                    // nincsenek RANSAC-cal szurve: ezek nem kerulhetnek a trackekbe
+                    if (isIdentityFallback(trel)) {
+                        Log.w("SfM", "Pair $i-${i+1}: pose estimation failed → stopping chain")
+                        break
+                    }
 
                     trackBuilder.addPairMatches(i, i + 1, matches)
 
@@ -492,7 +490,8 @@ class MainActivity : AppCompatActivity() {
 
                 Log.i(
                     "SFM_TRACK_CLOUD",
-                    "triangulated track points=${trackPoints.size}/${goodTracks.size}, failed=$failedTracks"
+                    "triangulated track points=${trackPoints.size}/${goodTracks.size}, failed=$failedTracks " +
+                            "(angle<2°=${trackTriangulator.rejectedAngle}, behind=${trackTriangulator.rejectedBehind})"
                 )
 
                 val trackErrors = mutableListOf<Double>()
@@ -550,7 +549,7 @@ class MainActivity : AppCompatActivity() {
 
                 Log.i(
                     "SFM_TRACK_CLOUD",
-                    "filtered track cloud=${filteredTrackPoints.size}/${trackPoints.size} using reproj<8px"
+                    "filtered track cloud=${filteredTrackPoints.size}/${trackPoints.size} using reproj<7px"
                 )
 
 
@@ -658,7 +657,9 @@ class MainActivity : AppCompatActivity() {
                 // Statistical outlier removal then normalize for display
                 //val cleaned = removeStatisticalOutliers(finalPoints)
                 //val normalized = normalizePointCloud(cleaned)
-                val cleaned = trackPoints//finalPoints
+                // finalPoints mar a reprojekcios hibaval szurt pontok; a normalizalas
+                // a legtavolabbi pontra skalaz, ezert elotte a kiugro pontokat ki kell venni
+                val cleaned = removeStatisticalOutliers(finalPoints)
                 val normalized = normalizePointCloud(cleaned)
 
                 Log.i("SFM_FINAL_INPUT", "finalPoints before cleanup=${finalPoints.size}")
@@ -930,6 +931,14 @@ class MainActivity : AppCompatActivity() {
         return filtered
     }
 
+    // PoseEstimator hiba eseten t = 0 vektort ad vissza (identity fallback)
+    private fun isIdentityFallback(t: Mat): Boolean {
+        val tx = t.get(0, 0)[0]
+        val ty = t.get(1, 0)[0]
+        val tz = t.get(2, 0)[0]
+        return Math.sqrt(tx * tx + ty * ty + tz * tz) < 1e-9
+    }
+
     private fun rotationAngleDeg(R: Mat): Double {
         // Rotation angle = arccos((trace(R) - 1) / 2)
         val trace = R.get(0,0)[0] + R.get(1,1)[0] + R.get(2,2)[0]
@@ -1006,6 +1015,42 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) {
             Log.e("SESSION", "Load failed", e)
             Toast.makeText(this, "Load failed: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    // Ideiglenes teszt: assets/test_images kepeit a cache-be masolja, es betolti
+    // a galeriaba (fajlnev szerinti sorrendben), mintha a kamerabol jottek volna
+    private fun loadTestImages() {
+        try {
+            val names = assets.list("test_images")
+                ?.filter { it.endsWith(".jpg", ignoreCase = true) }
+                ?.sorted()
+                .orEmpty()
+
+            if (names.isEmpty()) {
+                Toast.makeText(this, "No test images in assets/test_images", Toast.LENGTH_SHORT).show()
+                return
+            }
+
+            val dir = File(cacheDir, "test_images")
+            dir.mkdirs()
+
+            savedImages.clear()
+            for (name in names) {
+                val out = File(dir, name)
+                if (!out.exists()) {
+                    assets.open("test_images/$name").use { input ->
+                        out.outputStream().use { input.copyTo(it) }
+                    }
+                }
+                savedImages.add(Uri.fromFile(out))
+            }
+
+            Log.i("SESSION", "Loaded ${names.size} test images: $names")
+            Toast.makeText(this, "Loaded ${names.size} test images", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Log.e("SESSION", "Test image load failed", e)
+            Toast.makeText(this, "Test image load failed: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 

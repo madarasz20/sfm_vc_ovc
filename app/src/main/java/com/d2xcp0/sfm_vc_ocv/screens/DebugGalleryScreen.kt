@@ -14,6 +14,7 @@ import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.ui.graphics.Color
 import java.io.File
 
 private fun loadRotated(file: File): Bitmap? {
@@ -30,17 +31,28 @@ fun DebugGalleryScreen(
     Scaffold(
         topBar = {
             TopAppBar(title = { Text("Debug Match Images") },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color.LightGray,
+                    titleContentColor = Color.Black,
+                    navigationIconContentColor = Color.Black,
+                    actionIconContentColor = Color.Black
+                ),
                 navigationIcon = {
                 IconButton(onClick = onBack) {
                     Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
                 }
+
             },
                 actions = {
-                    Button(onClick = onClearDebug) {
+                    Button(onClick = onClearDebug,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color.Gray,
+                            contentColor = Color.Black
+                        )) {
                         Text("Clear All")
+
                     }
-                },
-                colors = TopAppBarDefaults.topAppBarColors())
+                })
         }
     ) { padding ->
         LazyColumn(

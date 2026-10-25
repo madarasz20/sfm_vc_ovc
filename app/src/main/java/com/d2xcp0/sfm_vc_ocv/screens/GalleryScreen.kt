@@ -24,6 +24,8 @@ import coil.request.ImageRequest
 import coil.transform.Transformation
 import android.graphics.Bitmap
 import android.graphics.Matrix
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.tooling.preview.Preview
 
 // Display-only rotation — does not affect SfM pipeline
 class RotateTransformation(private val degrees: Float) : Transformation {
@@ -53,12 +55,17 @@ fun GalleryScreen(
             topBar = {
                 TopAppBar(
                     title = { Text("Gallery") },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = Color.LightGray,
+                        titleContentColor = Color.Black,
+                        navigationIconContentColor = Color.Black,
+                        actionIconContentColor = Color.Black
+                    ),
                     navigationIcon = {
                         IconButton(onClick = onBack) {
                             Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
                         }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors()
+                    }
                 )
             }
         ) { paddingValues ->

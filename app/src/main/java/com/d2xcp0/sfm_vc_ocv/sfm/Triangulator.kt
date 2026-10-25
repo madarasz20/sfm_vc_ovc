@@ -194,8 +194,8 @@ class Triangulator(private val K: Mat) {
 
         Log.i(TAG, "After reprojection filter: ${reprojFiltered.size}/${cloud.size}")
 
-        val filtered = filterByDistanceMAD(cloud)
-        Log.i(TAG, "After distance MAD filter: ${filtered.size}/${cloud.size}")
+        val filtered = filterByDistanceMAD(reprojFiltered)
+        Log.i(TAG, "After distance MAD filter: ${filtered.size}/${reprojFiltered.size}")
 
         Log.i(
             TAG,
