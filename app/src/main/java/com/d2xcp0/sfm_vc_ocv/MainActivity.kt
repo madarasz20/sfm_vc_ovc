@@ -68,8 +68,9 @@ class MainActivity : AppCompatActivity() {
         // Ablakos parositas merete: i-(i+1) ... i-(i+MATCH_WINDOW). 1 = csak szomszedos parok
         private const val MATCH_WINDOW = 3
 
-        // Jellemzo tipus: ORB (regi), SIFT vagy ROOT_SIFT
-        private val FEATURE_TYPE = FeatureType.ROOT_SIFT
+        // Jellemzo tipus: ORB, SIFT vagy ROOT_SIFT
+        // ORB: tobb pont ezen a jelenetben (2133 vs 824), ROOT_SIFT: kisebb hiba (0.543 vs 0.766 px)
+        private val FEATURE_TYPE = FeatureType.ORB
     }
     external fun nativeTest(): String
 
