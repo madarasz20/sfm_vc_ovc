@@ -49,9 +49,15 @@ class IncrementalReconstructor(
         val registeredFrames: Int get() = rotations.count { it != null }
 
         // Csak azok a pontok, amelyeket legalabb minViews regisztralt kep lat
-        fun cloud(minViews: Int): List<Point3> = points.filterIndexed { i, _ ->
-            pointTracks[i].observations.count { rotations.getOrNull(it.frameIndex) != null } >= minViews
-        }
+        fun cloud(minViews: Int): List<Point3> = cloudWithTracks(minViews).map { it.first }
+
+        // Ugyanaz, a pont trackjevel egyutt (pl. szin mintavetelezeshez)
+        fun cloudWithTracks(minViews: Int): List<Pair<Point3, FeatureTrack>> =
+            points.indices
+                .filter { i ->
+                    pointTracks[i].observations.count { rotations.getOrNull(it.frameIndex) != null } >= minViews
+                }
+                .map { points[it] to pointTracks[it] }
     }
 
     private val bundleAdjuster = SparseBundleAdjuster(K)

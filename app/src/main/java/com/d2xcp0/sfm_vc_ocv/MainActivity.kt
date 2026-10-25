@@ -58,6 +58,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
     private var reconstructedCloud: List<Point3>? = null
+    private var reconstructedColors: List<FloatArray>? = null
     private var K: Mat? = null
     private var D: Mat? = null
     private lateinit var camera2CaptureManager: Camera2CaptureManager
@@ -308,6 +309,7 @@ class MainActivity : AppCompatActivity() {
                 // a megjelenitett felho a BA-val finomitott pontokbol all
                 val useIncrementalBA = true
                 var incrementalCloud: List<Point3>? = null
+                var incrementalColors: List<FloatArray>? = null
                 // parok relativ pozai az init par valasztasahoz: i -> (R, t, inlierek, rel. szog)
                 data class PairPose(val R: Mat, val t: Mat, val inliers: Int, val angle: Double)
                 val pairPoses = mutableMapOf<Int, PairPose>()
@@ -588,7 +590,9 @@ class MainActivity : AppCompatActivity() {
                     // linearis ujratriangulalas elvesztene a BA javitasat.
                     // Legalabb 3 kep: ugyanaz a kuszob, mint a track felhonel.
                     if (useIncrementalBA) {
-                        incrementalCloud = incremental.cloud(minViews = 3)
+                        val withTracks = incremental.cloudWithTracks(minViews = 3)
+                        incrementalCloud = withTracks.map { it.first }
+                        incrementalColors = withTracks.map { (_, track) -> trackColor(track, imgs) }
                         Log.i(
                             "SFM_INCREMENTAL",
                             "BA cloud: ${incrementalCloud!!.size} points (>=3 views) of ${incremental.points.size}, " +
@@ -779,10 +783,14 @@ class MainActivity : AppCompatActivity() {
                     finalReprojError = -1.0
                 }
 
+                // Szin csak a BA felhohoz van (a pontok trackjeibol)
+                var finalColors: List<FloatArray>? = null
+
                 incrementalCloud?.let {
                     Log.i("SFM_TRACK_CLOUD", "Using BA cloud for display: ${it.size} points " +
                             "(track cloud would be ${filteredTrackPoints.size})")
                     finalPoints = it
+                    finalColors = incrementalColors
                 }
 
                 /*Log.i("SfM", "BA complete: ${baResult.points3D.size} points, " +
@@ -803,7 +811,10 @@ class MainActivity : AppCompatActivity() {
                 //val normalized = normalizePointCloud(cleaned)
                 // finalPoints mar a reprojekcios hibaval szurt pontok; a normalizalas
                 // a legtavolabbi pontra skalaz, ezert elotte a kiugro pontokat ki kell venni
-                val cleaned = removeStatisticalOutliers(finalPoints)
+                // Indexekkel szurunk, hogy a szinek a pontokhoz igazodva maradjanak
+                val kept = statisticalInlierIndices(finalPoints)
+                val cleaned = kept.map { finalPoints[it] }
+                val cleanedColors = finalColors?.let { c -> kept.map { c[it] } }
                 val normalized = normalizePointCloud(cleaned)
 
                 Log.i("SFM_FINAL_INPUT", "finalPoints before cleanup=${finalPoints.size}")
@@ -817,7 +828,10 @@ class MainActivity : AppCompatActivity() {
 
 
                 reconstructedCloud      = normalized
+                reconstructedColors     = cleanedColors
                 PointCloudHolder.points = normalized
+                PointCloudHolder.colors = cleanedColors
+                Log.i("SfM", "Point colors: ${if (cleanedColors != null) "yes" else "no"}")
 
                 runOnUiThread {
                     Toast.makeText(
@@ -941,7 +955,7 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "No point cloud to export!", Toast.LENGTH_SHORT).show()
             return
         }
-        val file = PointCloudExporter.exportPLY(this, reconstructedCloud!!)
+        val file = PointCloudExporter.exportPLY(this, reconstructedCloud!!, reconstructedColors)
         Toast.makeText(this, "Saved to:\n${file?.absolutePath}", Toast.LENGTH_LONG).show()
     }
 
@@ -1010,6 +1024,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         PointCloudHolder.points = cloud
+        PointCloudHolder.colors = reconstructedColors
         startActivity(Intent(this, PointCloudActivity::class.java))
     }
 
@@ -1052,8 +1067,29 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun removeStatisticalOutliers(points: List<Point3>, neighbors: Int = 20, stdRatio: Double = 2.0): List<Point3> {
-        if (points.size < neighbors + 1) return points
+    // A track pontjanak szine: a megfigyelesek pixelszineinek atlaga (BGR kep -> RGB 0..1).
+    // Torzitas eseten a track pontok torzitasmentesitettek, ez nehany pixel eltolast jelenthet.
+    private fun trackColor(track: FeatureTrack, imgs: List<Mat>): FloatArray {
+        var r = 0.0; var g = 0.0; var b = 0.0
+        var n = 0
+        for (o in track.observations) {
+            val img = imgs.getOrNull(o.frameIndex) ?: continue
+            val x = Math.round(o.point2D.x).toInt()
+            val y = Math.round(o.point2D.y).toInt()
+            if (x < 0 || y < 0 || x >= img.cols() || y >= img.rows()) continue
+            val px = img.get(y, x) ?: continue
+            if (px.size < 3) continue
+            b += px[0]; g += px[1]; r += px[2]
+            n++
+        }
+        if (n == 0) return floatArrayOf(0.5f, 0.5f, 0.5f)
+        return floatArrayOf((r / n / 255.0).toFloat(), (g / n / 255.0).toFloat(), (b / n / 255.0).toFloat())
+    }
+
+    // Statisztikai kiugro-szures; a megtartott pontok indexeit adja vissza,
+    // igy a pontokhoz tartozo adatok (pl. szin) is szurhetok ugyanugy
+    private fun statisticalInlierIndices(points: List<Point3>, neighbors: Int = 20, stdRatio: Double = 2.0): List<Int> {
+        if (points.size < neighbors + 1) return points.indices.toList()
 
         // For each point, compute mean distance to k nearest neighbors
         val meanDists = points.map { p ->
@@ -1072,9 +1108,9 @@ class MainActivity : AppCompatActivity() {
         val globalStd  = Math.sqrt(meanDists.map { (it - globalMean) * (it - globalMean) }.average())
         val threshold  = globalMean + stdRatio * globalStd
 
-        val filtered = points.filterIndexed { i, _ -> meanDists[i] < threshold }
-        Log.i("SfM", "Outlier removal: ${points.size} → ${filtered.size} points")
-        return filtered
+        val kept = points.indices.filter { meanDists[it] < threshold }
+        Log.i("SfM", "Outlier removal: ${points.size} → ${kept.size} points")
+        return kept
     }
 
     // Kulcspontok torzitasmentesitese pixel koordinatakban (P = K).

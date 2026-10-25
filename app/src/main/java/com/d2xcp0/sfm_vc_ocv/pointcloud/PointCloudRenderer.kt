@@ -12,12 +12,17 @@ import javax.microedition.khronos.opengles.GL10
 
 class PointCloudRenderer : GLSurfaceView.Renderer {
 
+    companion object {
+        private val DEFAULT_COLOR = floatArrayOf(0.4f, 0.9f, 1.0f)
+    }
+
     // Camera rotation controlled by touch
     var angleX = 20f
     var angleY = -30f
 
     private var program = 0
     private var vertexBuffer: FloatBuffer? = null
+    private var colorBuffer: FloatBuffer? = null
     private var pointCount = 0
 
     private val projMatrix = FloatArray(16)
@@ -30,19 +35,24 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
         GLES20.glClearColor(0.02f, 0.02f, 0.05f, 1.0f)
         GLES20.glEnable(GLES20.GL_DEPTH_TEST)
 
+        // Pontonkenti szin (aColor); szin nelkuli felhonel a regi cian szin jon a pufferbol
         val vertexShaderCode = """
             uniform mat4 uMVPMatrix;
             attribute vec3 aPosition;
+            attribute vec3 aColor;
+            varying vec3 vColor;
             void main() {
                 gl_Position = uMVPMatrix * vec4(aPosition, 1.0);
                 gl_PointSize = 6.0;
+                vColor = aColor;
             }
         """.trimIndent()
 
         val fragmentShaderCode = """
             precision mediump float;
+            varying vec3 vColor;
             void main() {
-                gl_FragColor = vec4(0.4, 0.9, 1.0, 1.0);
+                gl_FragColor = vec4(vColor, 1.0);
             }
         """.trimIndent()
 
@@ -56,7 +66,7 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
         }
 
         //vertex buffer from the current point cloud
-        updatePointCloud(PointCloudHolder.points)
+        updatePointCloud(PointCloudHolder.points, PointCloudHolder.colors)
     }
 
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
@@ -103,16 +113,47 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
             vertexBuffer
         )
 
+        val colorHandle = GLES20.glGetAttribLocation(program, "aColor")
+        GLES20.glEnableVertexAttribArray(colorHandle)
+        GLES20.glVertexAttribPointer(
+            colorHandle,
+            3,
+            GLES20.GL_FLOAT,
+            false,
+            3 * 4,
+            colorBuffer
+        )
+
         GLES20.glDrawArrays(GLES20.GL_POINTS, 0, pointCount)
         GLES20.glDisableVertexAttribArray(posHandle)
+        GLES20.glDisableVertexAttribArray(colorHandle)
     }
 
-    fun updatePointCloud(points: List<Point3>) {
+    fun updatePointCloud(points: List<Point3>, colors: List<FloatArray>? = null) {
         pointCount = points.size
         if (pointCount == 0) {
             vertexBuffer = null
+            colorBuffer = null
             return
         }
+
+        // Szin nelkul (vagy elteru meretnel) az eredeti cian szin minden pontra
+        val useColors = colors != null && colors.size == pointCount
+        val colorData = FloatArray(pointCount * 3)
+        for (i in 0 until pointCount) {
+            val c = if (useColors) colors!![i] else DEFAULT_COLOR
+            colorData[3 * i] = c[0]
+            colorData[3 * i + 1] = c[1]
+            colorData[3 * i + 2] = c[2]
+        }
+        colorBuffer = ByteBuffer
+            .allocateDirect(colorData.size * 4)
+            .order(ByteOrder.nativeOrder())
+            .asFloatBuffer()
+            .apply {
+                put(colorData)
+                position(0)
+            }
 
         val data = FloatArray(pointCount * 3)
         var idx = 0
