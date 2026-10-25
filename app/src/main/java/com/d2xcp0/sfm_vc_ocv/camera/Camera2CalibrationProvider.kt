@@ -62,6 +62,12 @@ object Camera2CalibrationProvider {
         val sourceWidth = sourceRect.width()
         val sourceHeight = sourceRect.height()
 
+        // A skalazas fekvo (szenzor iranyu) kepet feltetelez; allo kepnel
+        // fx/fy es cx/cy felcserelodne, ez rossz K-t adna
+        if (targetWidth < targetHeight) {
+            Log.w(TAG, "Portrait image ${targetWidth}x$targetHeight — K scaling assumes landscape sensor orientation!")
+        }
+
         val scaleX = targetWidth.toDouble() / sourceWidth.toDouble()
         val scaleY = targetHeight.toDouble() / sourceHeight.toDouble()
 
@@ -82,11 +88,15 @@ object Camera2CalibrationProvider {
         K.put(2, 1, 0.0)
         K.put(2, 2, 1.0)
 
-        val D = if (distortion != null) {
-            val d = Mat.zeros(1, distortion.size, CvType.CV_64F)
-            for (i in distortion.indices) {
-                d.put(0, i, distortion[i].toDouble())
-            }
+        // Android LENS_DISTORTION sorrend: [k1, k2, k3, p1, p2]
+        // OpenCV sorrend:                  [k1, k2, p1, p2, k3]
+        val D = if (distortion != null && distortion.size >= 5) {
+            val d = Mat.zeros(1, 5, CvType.CV_64F)
+            d.put(0, 0, distortion[0].toDouble()) // k1
+            d.put(0, 1, distortion[1].toDouble()) // k2
+            d.put(0, 2, distortion[3].toDouble()) // p1
+            d.put(0, 3, distortion[4].toDouble()) // p2
+            d.put(0, 4, distortion[2].toDouble()) // k3
             d
         } else {
             Log.w(TAG, "LENS_DISTORTION unavailable; using zero distortion")

@@ -25,6 +25,7 @@ import java.util.*
 import android.util.Log
 import com.d2xcp0.sfm_vc_ocv.camera.Camera2CalibrationProvider
 import com.d2xcp0.sfm_vc_ocv.camera.ExifCalibrationProvider
+import com.d2xcp0.sfm_vc_ocv.camera.CaptureLock
 import com.d2xcp0.sfm_vc_ocv.camera.Camera2CaptureManager
 import com.d2xcp0.sfm_vc_ocv.camera.CameraCalibrator
 import com.d2xcp0.sfm_vc_ocv.pointcloud.PointCloudExporter
@@ -224,10 +225,34 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 val K = calib.K
-                val D = calib.D
+                val Draw = calib.D
 
                 Log.i("SFM", "Calibration source=${calib.cameraId} K=${K.dump()}")
-                Log.i("SFM", "Calibration source=${calib.cameraId} D=${D.dump()}")
+                Log.i("SFM", "Calibration source=${calib.cameraId} D=${Draw.dump()}")
+
+                // Ellenorzes: a Camera2 fokusztavolsag nagysagrendileg egyezzen az EXIF-bol becsulttel
+                if (calib.cameraId != "exif") {
+                    try {
+                        val exifK = ExifCalibrationProvider.loadFromImage(
+                            this, savedImages.first(), firstImg.cols(), firstImg.rows()
+                        ).K
+                        val fxCam = K.get(0, 0)[0]
+                        val fxExif = exifK.get(0, 0)[0]
+                        val diff = Math.abs(fxCam - fxExif) / fxExif * 100.0
+                        Log.i("SFM", "Calibration check: fx camera2=${"%.1f".format(fxCam)} exif=${"%.1f".format(fxExif)} diff=${"%.1f".format(diff)}%")
+                        if (diff > 10.0) {
+                            Log.w("SFM", "Calibration check: Camera2 and EXIF focal length differ by more than 10% — check K scaling")
+                        }
+                    } catch (e: Exception) {
+                        Log.w("SFM", "Calibration check skipped: ${e.message}")
+                    }
+                }
+
+                // A kulcspontokat egyszer, kivonas utan torzitasmentesitjuk (lent),
+                // utana mindenhol pinhole modell: D = 0. Igy a pozbecsles, triangulacio,
+                // PnP es reprojekcios hiba ugyanazt a kameramodellt hasznalja.
+                val hasDistortion = Core.norm(Draw) > 1e-12
+                val D = Mat.zeros(1, 5, CvType.CV_64F)
 
                 val imgs = rawImgs
 
@@ -242,7 +267,11 @@ class MainActivity : AppCompatActivity() {
 
                 // minden keprol jellemzo kivon
                 Log.i("SfM", "Extracting features for all frames...")
-                val allFeatures = imgs.map { img -> extractor.compute(img) }
+                val allFeatures = imgs.map { img ->
+                    val (kp, desc) = extractor.compute(img)
+                    if (hasDistortion) undistortKeypoints(kp, K, Draw) to desc else kp to desc
+                }
+                Log.i("SfM", "Keypoints undistorted: $hasDistortion")
 
                 //legjobb par kivalaszt Miert?
                 //val bestPair = findBestInitialPair(imgs, allFeatures, matcher)
@@ -264,6 +293,13 @@ class MainActivity : AppCompatActivity() {
                 //var anchorCloud: List<Point3>? = null
                 //var anchorDescriptors: Mat?    = null
 
+                // true: PnP alapu inkrementalis regisztracio (IncrementalReconstructor)
+                // false: regi paronkenti pozlancolas (osszehasonlitashoz megtartva)
+                val useIncremental = true
+                // parok relativ pozai az init par valasztasahoz: i -> (R, t, inlierek, rel. szog)
+                data class PairPose(val R: Mat, val t: Mat, val inliers: Int, val angle: Double)
+                val pairPoses = mutableMapOf<Int, PairPose>()
+
                 //kepenkent parositunk
                 for (i in 0 until imgs.size - 1) {
 
@@ -279,8 +315,9 @@ class MainActivity : AppCompatActivity() {
                         Log.w("SfM", "Pair $i SKIPPED: only ${matches.size} matches")
 
                         // A lancolas nem tudja athidalni a hianyzo part: continue eseten
-                        // rotations[k] mar nem a k. framehez tartozna
-                        break
+                        // rotations[k] mar nem a k. framehez tartozna.
+                        // Inkrementalis modban nincs lanc, a par egyszeruen kimarad.
+                        if (useIncremental) continue else break
                     }
 
                     //R,T eloallit
@@ -299,8 +336,8 @@ class MainActivity : AppCompatActivity() {
                     // Sikertelen pozbecsles eseten identity jon vissza, es a matchek
                     // nincsenek RANSAC-cal szurve: ezek nem kerulhetnek a trackekbe
                     if (isIdentityFallback(trel)) {
-                        Log.w("SfM", "Pair $i-${i+1}: pose estimation failed → stopping chain")
-                        break
+                        Log.w("SfM", "Pair $i-${i+1}: pose estimation failed → pair not used")
+                        if (useIncremental) continue else break
                     }
 
                     trackBuilder.addPairMatches(i, i + 1, matches)
@@ -314,6 +351,14 @@ class MainActivity : AppCompatActivity() {
                         matches.toListOfPairs(),
                         "pair_${i}_${i+1}_01_pose_inliers"
                     )
+
+                    // Inkrementalis modban a par csak trackeket es init-par jeloltet ad,
+                    // a pozokat kesobb a PnP szamolja
+                    if (useIncremental) {
+                        pairPoses[i] = PairPose(Rrel, trel, matches.size, rotationAngleDeg(Rrel))
+                        Log.i("SfM", "Pair $i-${i+1}: inliers=${matches.size} relRot=${"%.1f".format(rotationAngleDeg(Rrel))}°")
+                        continue
+                    }
 
 
                     Log.i("SfM", "Pose estimation: Pair $i pose: R=${Rrel.dump()}, t=${trel.dump()}")
@@ -448,7 +493,7 @@ class MainActivity : AppCompatActivity() {
                 Log.i("SfM", "Sequential SfM done. Raw points: ${allPoints.size}, " +
                         "frames: ${rotations.size}, observations: ${observations.size}")
 
-                if (allPoints.isEmpty()) {
+                if (!useIncremental && allPoints.isEmpty()) {
                     runOnUiThread {
                         Toast.makeText(this, "SfM failed: no points reconstructed", Toast.LENGTH_LONG).show()
                     }
@@ -458,6 +503,50 @@ class MainActivity : AppCompatActivity() {
                 Log.i("SFM_TRACK_CLOUD", "MARKER A: reached after pair loop")
 
                 trackBuilder.logStats()
+
+                if (useIncremental) {
+                    // Init par: eleg nagy bazis (>= 3° relativ forgas), azon belul a legtobb inlier.
+                    // Ha egyik par sem eri el a 3°-ot, a legtobb inlieres par.
+                    val initEntry = pairPoses.entries
+                        .filter { it.value.angle in 3.0..25.0 }
+                        .maxByOrNull { it.value.inliers }
+                        ?: pairPoses.entries.maxByOrNull { it.value.inliers }
+
+                    if (initEntry == null) {
+                        runOnUiThread {
+                            Toast.makeText(this, "SfM failed: no usable image pair", Toast.LENGTH_LONG).show()
+                        }
+                        return@Thread
+                    }
+
+                    val initA = initEntry.key
+                    val init = initEntry.value
+                    Log.i("SFM_INCREMENTAL", "init pair $initA-${initA + 1}: inliers=${init.inliers} relRot=${"%.1f".format(init.angle)}°")
+
+                    val incremental = IncrementalReconstructor(K).reconstruct(
+                        numFrames = imgs.size,
+                        tracks = trackBuilder.getTracks(),
+                        initFrameA = initA,
+                        initFrameB = initA + 1,
+                        initR = init.R,
+                        initT = init.t
+                    )
+
+                    // A pozokat frame index szerint taroljuk; nem regisztralt frame = ures Mat,
+                    // ezt a TrackTriangulator es a reprojekcios hiba szamitas kihagyja
+                    rotations.clear()
+                    translations.clear()
+                    for (f in 0 until imgs.size) {
+                        rotations.add(incremental.rotations[f] ?: Mat())
+                        translations.add(incremental.translations[f] ?: Mat())
+                    }
+
+                    Log.i(
+                        "SFM_INCREMENTAL",
+                        "poses for final cloud: registered=${incremental.registeredFrames}/${imgs.size}, " +
+                                "unregistered=${(0 until imgs.size).filter { incremental.rotations[it] == null }}"
+                    )
+                }
 
                 val tracks = trackBuilder.getTracks()
                 val goodTracks = trackBuilder.getGoodTracks(minLength = 3)
@@ -805,6 +894,8 @@ class MainActivity : AppCompatActivity() {
         val dir = getExternalFilesDir("Pictures")
         dir?.listFiles()?.forEach { it.delete() }
         savedImages.clear()
+        // Uj kepsorozat: a kovetkezo elso kep ujra rogziti a fokuszt/expoziciot
+        CaptureLock.reset()
         Toast.makeText(this, "Gallery cleared!", Toast.LENGTH_LONG).show()
     }
 
@@ -929,6 +1020,21 @@ class MainActivity : AppCompatActivity() {
         val filtered = points.filterIndexed { i, _ -> meanDists[i] < threshold }
         Log.i("SfM", "Outlier removal: ${points.size} → ${filtered.size} points")
         return filtered
+    }
+
+    // Kulcspontok torzitasmentesitese pixel koordinatakban (P = K).
+    // A sorrend (es igy a descriptor indexek) nem valtozik.
+    private fun undistortKeypoints(kps: MatOfKeyPoint, K: Mat, D: Mat): MatOfKeyPoint {
+        val arr = kps.toArray()
+        if (arr.isEmpty()) return kps
+
+        val src = MatOfPoint2f(*arr.map { it.pt }.toTypedArray())
+        val dst = MatOfPoint2f()
+        Calib3d.undistortPoints(src, dst, K, D, Mat(), K)
+
+        val pts = dst.toArray()
+        for (i in arr.indices) arr[i].pt = pts[i]
+        return MatOfKeyPoint(*arr)
     }
 
     // PoseEstimator hiba eseten t = 0 vektort ad vissza (identity fallback)

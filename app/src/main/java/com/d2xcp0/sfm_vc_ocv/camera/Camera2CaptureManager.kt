@@ -54,6 +54,11 @@ class Camera2CaptureManager(
     //private var cameraD: Mat? = null
     private var intrinsicSourceSize: Size? = null
 
+    // Keszulek kepessegek (openCamera-ban toltodnek)
+    private var supportsManualSensor = false
+    private var supportsManualFocus = false
+    private var supportsDistortionOff = false
+
     fun startCamera(textureView: TextureView) {
         startBackgroundThread()
 
@@ -104,6 +109,23 @@ class Camera2CaptureManager(
 
         val jpegSizes = map?.getOutputSizes(ImageFormat.JPEG)?.toList().orEmpty()
         jpegSize = chooseFixedJpegSize(jpegSizes)
+
+        val capabilities = characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)
+        supportsManualSensor = capabilities?.contains(
+            CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR
+        ) == true
+        // 0 = fix fokuszu lencse, ott nincs mit rogziteni
+        val minFocus = characteristics.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0f
+        supportsManualFocus = supportsManualSensor && minFocus > 0f
+        supportsDistortionOff = characteristics.get(
+            CameraCharacteristics.DISTORTION_CORRECTION_AVAILABLE_MODES
+        )?.contains(CameraMetadata.DISTORTION_CORRECTION_MODE_OFF) == true
+
+        Log.i(
+            tag,
+            "Capabilities: manualSensor=$supportsManualSensor manualFocus=$supportsManualFocus " +
+                    "distortionOff=$supportsDistortionOff locked=${CaptureLock.isLocked}"
+        )
 
 // IMPORTANT: call after jpegSize is known
         //extractCameraCalibration(characteristics)
@@ -245,12 +267,36 @@ class Camera2CaptureManager(
     private fun applyStableSettings(builder: CaptureRequest.Builder) {
         builder.set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO)
 
-        // First safe version: stable API capture, not fully manual yet.
-        builder.set(
-            CaptureRequest.CONTROL_AF_MODE,
-            CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
-        )
-        builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+        // ISP torzitaskorrekcio kikapcsolva: a kep a nyers lencsemodellt koveti,
+        // igy a LENS_INTRINSIC_CALIBRATION (pre-correction) + LENS_DISTORTION ervenyes ra
+        if (supportsDistortionOff) {
+            builder.set(
+                CaptureRequest.DISTORTION_CORRECTION_MODE,
+                CameraMetadata.DISTORTION_CORRECTION_MODE_OFF
+            )
+        }
+
+        val lockedFocus = CaptureLock.focusDistance
+        if (supportsManualFocus && lockedFocus != null) {
+            builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
+            builder.set(CaptureRequest.LENS_FOCUS_DISTANCE, lockedFocus)
+        } else {
+            builder.set(
+                CaptureRequest.CONTROL_AF_MODE,
+                CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
+            )
+        }
+
+        val lockedExposure = CaptureLock.exposureTimeNs
+        val lockedIso = CaptureLock.iso
+        if (supportsManualSensor && lockedExposure != null && lockedIso != null) {
+            builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
+            builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, lockedExposure)
+            builder.set(CaptureRequest.SENSOR_SENSITIVITY, lockedIso)
+        } else {
+            builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+        }
+
         builder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
 
         // No zoom/crop region is set.
@@ -282,11 +328,22 @@ class Camera2CaptureManager(
                     val exposure = result.get(CaptureResult.SENSOR_EXPOSURE_TIME)
                     val iso = result.get(CaptureResult.SENSOR_SENSITIVITY)
                     val focus = result.get(CaptureResult.LENS_FOCUS_DISTANCE)
+                    val afMode = result.get(CaptureResult.CONTROL_AF_MODE)
+                    val distortionMode = result.get(CaptureResult.DISTORTION_CORRECTION_MODE)
 
                     Log.i(
                         tag,
-                        "Captured. size=$jpegSize exposure=$exposure iso=$iso focus=$focus cameraId=$cameraId"
+                        "Captured. size=$jpegSize exposure=$exposure iso=$iso focus=$focus " +
+                                "afMode=$afMode distortionMode=$distortionMode " +
+                                "locked=${CaptureLock.isLocked} cameraId=$cameraId"
                     )
+
+                    // A sorozat elso kepe rogziti a fokuszt es az expoziciot a tobbinek
+                    if (!CaptureLock.isLocked && supportsManualSensor &&
+                        exposure != null && iso != null && focus != null
+                    ) {
+                        CaptureLock.lock(focus, exposure, iso)
+                    }
                 }
             },
             backgroundHandler
