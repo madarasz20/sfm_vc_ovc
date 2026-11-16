@@ -23,6 +23,7 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
 import android.util.Log
+import android.os.SystemClock
 import com.d2xcp0.sfm_vc_ocv.camera.Camera2CalibrationProvider
 import com.d2xcp0.sfm_vc_ocv.camera.ExifCalibrationProvider
 import com.d2xcp0.sfm_vc_ocv.camera.CaptureLock
@@ -31,6 +32,7 @@ import com.d2xcp0.sfm_vc_ocv.camera.CameraCalibrator
 import com.d2xcp0.sfm_vc_ocv.pointcloud.PointCloudExporter
 import com.d2xcp0.sfm_vc_ocv.pointcloud.PointCloudHolder
 import com.d2xcp0.sfm_vc_ocv.helper.TrackTriangulator
+import com.d2xcp0.sfm_vc_ocv.helper.SfmRunLog
 import org.opencv.android.OpenCVLoader
 import org.opencv.core.Mat
 import org.opencv.imgcodecs.Imgcodecs
@@ -194,9 +196,12 @@ class MainActivity : AppCompatActivity() {
         }
 
         Thread {
+            // Meresi naplo: SFM_TIMING (lepesenkenti ido) es SFM_SUMMARY (egy sor a fo szamokkal)
+            val runLog = SfmRunLog()
             try {
                 //kepek:
                 val rawImgs = savedImages.map { uri -> uriToMat(uri) }
+                runLog.step("load")
 
                 //egyelore elso 3
                 /*val rawImgs = savedImages
@@ -261,6 +266,15 @@ class MainActivity : AppCompatActivity() {
                 // PnP es reprojekcios hiba ugyanazt a kameramodellt hasznalja.
                 val hasDistortion = Core.norm(Draw) > 1e-12
                 val D = Mat.zeros(1, 5, CvType.CV_64F)
+                runLog.step("calibration")
+
+                runLog.set("images", rawImgs.size)
+                runLog.set("first_image", savedImages.first().lastPathSegment)
+                runLog.set("test_images", usingTestImages)
+                runLog.set("resolution", "${firstImg.cols()}x${firstImg.rows()}")
+                runLog.set("calib", calib.cameraId)
+                runLog.set("fx", "%.1f".format(K.get(0, 0)[0]))
+                runLog.set("undistorted", hasDistortion)
 
                 val imgs = rawImgs
 
@@ -281,6 +295,9 @@ class MainActivity : AppCompatActivity() {
                     if (hasDistortion) undistortKeypoints(kp, K, Draw) to desc else kp to desc
                 }
                 Log.i("SfM", "Keypoints undistorted: $hasDistortion")
+                runLog.step("extraction")
+                runLog.set("feature", FEATURE_TYPE)
+                runLog.set("keypoints_avg", allFeatures.map { it.first.rows() }.average().toInt())
 
                 //legjobb par kivalaszt Miert?
                 //val bestPair = findBestInitialPair(imgs, allFeatures, matcher)
@@ -313,6 +330,10 @@ class MainActivity : AppCompatActivity() {
                 // parok relativ pozai az init par valasztasahoz: i -> (R, t, inlierek, rel. szog)
                 data class PairPose(val R: Mat, val t: Mat, val inliers: Int, val angle: Double)
                 val pairPoses = mutableMapOf<Int, PairPose>()
+
+                runLog.set("incremental", useIncremental)
+                runLog.set("ba", useIncrementalBA)
+                runLog.set("window", MATCH_WINDOW)
 
                 //kepenkent parositunk
                 for (i in 0 until imgs.size - 1) {
@@ -356,6 +377,7 @@ class MainActivity : AppCompatActivity() {
 
                     trackBuilder.addPairMatches(i, i + 1, matches)
 
+                    val debugStart = SystemClock.elapsedRealtime()
                     DebugVisualizer.saveMatchesImage(
                         this,
                         imgs[i],
@@ -365,6 +387,8 @@ class MainActivity : AppCompatActivity() {
                         matches.toListOfPairs(),
                         "pair_${i}_${i+1}_01_pose_inliers"
                     )
+                    // a debug kepek mentese nem resze a rekonstrukcionak, kulon merjuk
+                    runLog.detail("matching_neighbors.debug_images", SystemClock.elapsedRealtime() - debugStart)
 
                     // Inkrementalis modban a par csak trackeket es init-par jeloltet ad,
                     // a pozokat kesobb a PnP szamolja
@@ -506,6 +530,10 @@ class MainActivity : AppCompatActivity() {
 
                 Log.i("SfM", "Sequential SfM done. Raw points: ${allPoints.size}, " +
                         "frames: ${rotations.size}, observations: ${observations.size}")
+                runLog.step("matching_neighbors")
+                if (useIncremental) runLog.set("neighbor_pairs_ok", "${pairPoses.size}/${imgs.size - 1}")
+                var windowPairsOk = 0
+                var windowPairsAll = 0
 
                 // Ablakos parositas: i-(i+2) es i-(i+3) parok is a trackekbe kerulnek.
                 // Hosszabb trackek (tobb 2D-3D par a PnP-hez), nagyobb bazis a triangulaciohoz,
@@ -513,6 +541,7 @@ class MainActivity : AppCompatActivity() {
                 if (useIncremental) {
                     for (gap in 2..MATCH_WINDOW) {
                         for (i in 0 until imgs.size - gap) {
+                            windowPairsAll++
                             val (kp1, desc1) = allFeatures[i]
                             val (kp2, desc2) = allFeatures[i + gap]
                             val m = matcher.match(desc1, desc2, kp1, kp2)
@@ -527,12 +556,16 @@ class MainActivity : AppCompatActivity() {
                                 continue
                             }
                             trackBuilder.addPairMatches(i, i + gap, m)
+                            windowPairsOk++
                             Log.i("SfM", "Window pair $i-${i + gap}: ${m.size} inliers added to tracks")
                         }
                     }
+                    runLog.set("window_pairs_ok", "$windowPairsOk/$windowPairsAll")
                 }
+                runLog.step("matching_window")
 
                 if (!useIncremental && allPoints.isEmpty()) {
+                    runLog.finish("failed: no points reconstructed")
                     runOnUiThread {
                         Toast.makeText(this, "SfM failed: no points reconstructed", Toast.LENGTH_LONG).show()
                     }
@@ -542,6 +575,8 @@ class MainActivity : AppCompatActivity() {
                 Log.i("SFM_TRACK_CLOUD", "MARKER A: reached after pair loop")
 
                 trackBuilder.logStats()
+                runLog.set("tracks", trackBuilder.getTracks().size)
+                runLog.set("tracks_3plus", trackBuilder.getGoodTracks(minLength = 3).size)
 
                 if (useIncremental) {
                     // Init par: eleg nagy bazis (>= 3° relativ forgas), azon belul a legtobb inlier.
@@ -552,6 +587,7 @@ class MainActivity : AppCompatActivity() {
                         ?: pairPoses.entries.maxByOrNull { it.value.inliers }
 
                     if (initEntry == null) {
+                        runLog.finish("failed: no usable image pair")
                         runOnUiThread {
                             Toast.makeText(this, "SfM failed: no usable image pair", Toast.LENGTH_LONG).show()
                         }
@@ -570,6 +606,19 @@ class MainActivity : AppCompatActivity() {
                         initR = init.R,
                         initT = init.t
                     )
+                    runLog.step("reconstruction")
+                    runLog.detail("reconstruction.local_ba", incremental.localBAMillis)
+                    incremental.finalBA?.let { runLog.detail("reconstruction.final_ba", it.millis) }
+
+                    runLog.set("init_pair", "$initA-${initA + 1}")
+                    runLog.set("registered", "${incremental.registeredFrames}/${imgs.size}")
+                    runLog.set(
+                        "unregistered",
+                        (0 until imgs.size).filter { incremental.rotations[it] == null }
+                            .joinToString(",").ifEmpty { "-" }
+                    )
+                    runLog.set("points_reconstructed", incremental.points.size)
+                    runLog.set("final_rms_px", incremental.finalBA?.let { "%.3f".format(it.finalRms) })
 
                     // A pozokat frame index szerint taroljuk; nem regisztralt frame = ures Mat,
                     // ezt a TrackTriangulator es a reprojekcios hiba szamitas kihagyja
@@ -593,6 +642,8 @@ class MainActivity : AppCompatActivity() {
                         val withTracks = incremental.cloudWithTracks(minViews = 3)
                         incrementalCloud = withTracks.map { it.first }
                         incrementalColors = withTracks.map { (_, track) -> trackColor(track, imgs) }
+                        runLog.set("points_3views", incrementalCloud!!.size)
+                        runLog.step("coloring")
                         Log.i(
                             "SFM_INCREMENTAL",
                             "BA cloud: ${incrementalCloud!!.size} points (>=3 views) of ${incremental.points.size}, " +
@@ -614,7 +665,16 @@ class MainActivity : AppCompatActivity() {
                 val trackPointTracks = mutableListOf<FeatureTrack>()
                 var failedTracks = 0
 
-                for (track in goodTracks) {
+                // A track felho csak akkor kell, ha nincs BA felho (regi lancolas, vagy
+                // inkrementalis mod BA nelkul). Inkrementalis + BA modban a megjelenitett
+                // felho a BA pontokbol all, ezert a triangulacio kimarad (futasido).
+                val needTrackCloud = incrementalCloud == null
+                runLog.set("track_cloud", if (needTrackCloud) "computed" else "skipped")
+                if (!needTrackCloud) {
+                    Log.i("SFM_TRACK_CLOUD", "Track cloud skipped: BA cloud is used for display")
+                }
+
+                for (track in if (needTrackCloud) goodTracks else emptyList()) {
                     val p: Point3? = trackTriangulator.triangulateTrack(
                         track,
                         rotations,
@@ -732,6 +792,7 @@ class MainActivity : AppCompatActivity() {
 
                 if (badPointKeys != 0 || badFrameObs != 0 || pointsNotExactly2Obs != 0) {
                     Log.e("SFM_BA_INPUT", "Invalid BA input graph. Aborting before BA.")
+                    runLog.finish("failed: invalid BA input graph")
                     runOnUiThread {
                         Toast.makeText(this, "Invalid BA input graph — check logs", Toast.LENGTH_LONG).show()
                     }
@@ -783,12 +844,15 @@ class MainActivity : AppCompatActivity() {
                     finalReprojError = -1.0
                 }
 
+                // Track felho (TrackTriangulator, reprojekcios statisztika); inkrementalis + BA
+                // modban kimarad, ilyenkor ez a lepes ~0 ms
+                runLog.step("legacy_track_cloud")
+
                 // Szin csak a BA felhohoz van (a pontok trackjeibol)
                 var finalColors: List<FloatArray>? = null
 
                 incrementalCloud?.let {
-                    Log.i("SFM_TRACK_CLOUD", "Using BA cloud for display: ${it.size} points " +
-                            "(track cloud would be ${filteredTrackPoints.size})")
+                    Log.i("SFM_TRACK_CLOUD", "Using BA cloud for display: ${it.size} points")
                     finalPoints = it
                     finalColors = incrementalColors
                 }
@@ -832,6 +896,9 @@ class MainActivity : AppCompatActivity() {
                 PointCloudHolder.points = normalized
                 PointCloudHolder.colors = cleanedColors
                 Log.i("SfM", "Point colors: ${if (cleanedColors != null) "yes" else "no"}")
+                runLog.step("outlier_filter")
+                runLog.set("points_displayed", normalized.size)
+                runLog.finish("ok")
 
                 runOnUiThread {
                     Toast.makeText(
@@ -845,6 +912,7 @@ class MainActivity : AppCompatActivity() {
 
             } catch (e: Exception) {
                 Log.e("SfM", "SfM failed", e)
+                runLog.finish("failed: ${e.javaClass.simpleName}")
                 runOnUiThread {
                     Toast.makeText(this, "SfM failed: ${e.message}", Toast.LENGTH_LONG).show()
                 }
@@ -1089,19 +1157,63 @@ class MainActivity : AppCompatActivity() {
     // Statisztikai kiugro-szures; a megtartott pontok indexeit adja vissza,
     // igy a pontokhoz tartozo adatok (pl. szin) is szurhetok ugyanugy
     private fun statisticalInlierIndices(points: List<Point3>, neighbors: Int = 20, stdRatio: Double = 2.0): List<Int> {
-        if (points.size < neighbors + 1) return points.indices.toList()
+        val n = points.size
+        if (n < neighbors + 1) return points.indices.toList()
 
-        // For each point, compute mean distance to k nearest neighbors
-        val meanDists = points.map { p ->
-            val dists = points
-                .filter { it !== p }
-                .map { q ->
-                    val dx = p.x - q.x; val dy = p.y - q.y; val dz = p.z - q.z
-                    Math.sqrt(dx*dx + dy*dy + dz*dz)
+        // Pontonkent a k legkozelebbi szomszed atlagos tavolsaga.
+        // Korabban ez O(n²) volt (minden pontra az osszes tavolsag kiszamitasa es rendezese).
+        // Most egyenletes racson keresunk, gyurunkent tagulva: a racs kivulrol meg nem
+        // latogatott cellainak pontjai legalabb r * cell tavolsagra vannak, igy ha a k-adik
+        // talalat ennel kozelebb van, a k legkozelebbi szomszed biztosan megvan.
+        // Az eredmeny pontosan ugyanaz, mint a teljes kereses.
+        val xs = DoubleArray(n) { points[it].x }
+        val ys = DoubleArray(n) { points[it].y }
+        val zs = DoubleArray(n) { points[it].z }
+        val minX = xs.min(); val minY = ys.min(); val minZ = zs.min()
+        val extX = xs.max() - minX; val extY = ys.max() - minY; val extZ = zs.max() - minZ
+        val ext = maxOf(extX, extY, extZ)
+        if (ext < 1e-12) return points.indices.toList()
+
+        // Cellameret: egyenletes eloszlasnal kb. 'neighbors' pont jutna egy cellara
+        val vol = maxOf(extX, ext * 1e-3) * maxOf(extY, ext * 1e-3) * maxOf(extZ, ext * 1e-3)
+        val cell = maxOf(Math.cbrt(vol * neighbors / n), ext * 1e-4)
+        val maxIdx = (ext / cell).toInt() + 1
+
+        fun idx(v: Double, min: Double) = ((v - min) / cell).toInt()
+        fun key(ix: Int, iy: Int, iz: Int): Long =
+            (ix.toLong() shl 42) or (iy.toLong() shl 21) or iz.toLong()
+
+        val grid = HashMap<Long, MutableList<Int>>()
+        for (i in 0 until n) {
+            grid.getOrPut(key(idx(xs[i], minX), idx(ys[i], minY), idx(zs[i], minZ))) { mutableListOf() }.add(i)
+        }
+
+        val meanDists = DoubleArray(n)
+        val cand = ArrayList<Double>()
+        for (i in 0 until n) {
+            val cx = idx(xs[i], minX); val cy = idx(ys[i], minY); val cz = idx(zs[i], minZ)
+            cand.clear()
+            var r = 0
+            while (true) {
+                // Az r-edik gyuru (Chebyshev-tavolsag pontosan r) cellai
+                for (dx in -r..r) for (dy in -r..r) for (dz in -r..r) {
+                    if (maxOf(Math.abs(dx), Math.abs(dy), Math.abs(dz)) != r) continue
+                    val list = grid[key(cx + dx, cy + dy, cz + dz)] ?: continue
+                    for (j in list) {
+                        if (j == i) continue
+                        val ddx = xs[i] - xs[j]; val ddy = ys[i] - ys[j]; val ddz = zs[i] - zs[j]
+                        cand.add(Math.sqrt(ddx * ddx + ddy * ddy + ddz * ddz))
+                    }
                 }
-                .sorted()
-                .take(neighbors)
-            dists.average()
+                if (cand.size >= neighbors) {
+                    cand.sort()
+                    if (cand[neighbors - 1] <= r * cell || r > maxIdx) break
+                } else if (r > maxIdx) {
+                    break
+                }
+                r++
+            }
+            meanDists[i] = cand.take(neighbors).average()
         }
 
         val globalMean = meanDists.average()

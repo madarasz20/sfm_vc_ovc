@@ -44,7 +44,8 @@ class IncrementalReconstructor(
         val pointTracks: List<FeatureTrack>,
         val rotations: List<Mat?>,      // null = a frame nem regisztralodott
         val translations: List<Mat?>,
-        val finalBA: SparseBundleAdjuster.Stats?
+        val finalBA: SparseBundleAdjuster.Stats?,
+        val localBAMillis: Long         // a lokalis BA futasok osszideje (meresi naplohoz)
     ) {
         val registeredFrames: Int get() = rotations.count { it != null }
 
@@ -90,6 +91,7 @@ class IncrementalReconstructor(
 
         // Regisztralas az init partol elore, majd visszafele
         val order = (initFrameB + 1 until numFrames) + (initFrameA - 1 downTo 0)
+        var localBAMillis = 0L
 
         for (f in order) {
             val neighbour = if (f > initFrameB) f - 1 else f + 1
@@ -109,11 +111,12 @@ class IncrementalReconstructor(
 
             // Lokalis BA: a hiba ne halmozodjon a kovetkezo kepek regisztraciojaig
             if (useBundleAdjustment && rotations.count { it != null } >= 3) {
-                bundleAdjuster.adjust(
+                val local = bundleAdjuster.adjust(
                     rotations, translations, points, tracks,
                     fixedFrame = initFrameA, scaleFrame = initFrameB,
                     maxIterations = LOCAL_BA_ITERATIONS
                 )
+                localBAMillis += local?.millis ?: 0L
                 removed = filterPoints(tracks, rotations, translations, points)
                 if (removed > 0) Log.i(TAG, "frame $f: -$removed points after local BA")
             }
@@ -149,7 +152,8 @@ class IncrementalReconstructor(
             pointTracks = ids.map { byId.getValue(it) },
             rotations = rotations.toList(),
             translations = translations.toList(),
-            finalBA = finalBA
+            finalBA = finalBA,
+            localBAMillis = localBAMillis
         )
         Log.i(TAG, "done: registered ${result.registeredFrames}/$numFrames frames, ${result.points.size} points")
         return result

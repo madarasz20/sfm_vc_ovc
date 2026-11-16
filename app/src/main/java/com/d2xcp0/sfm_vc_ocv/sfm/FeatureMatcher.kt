@@ -93,8 +93,8 @@ class FeatureMatcher {
 
 
         Log.i(TAG, "Raw matches=${knnMatches.size}, good=${goodMatches.size}")
-        val rawMatches = MatOfDMatch()
-        matcher.match(desc1, desc2, rawMatches)
+        // Korabban itt egy teljes, fel nem hasznalt brute-force matcher.match() is futott
+        // (rawMatches), ami paronkent megduplazta a parositasi idot; eltavolitva.
 
         /*val goodMatches = rawMatches.toArray()
             .filter { it.distance < 40.0 }
