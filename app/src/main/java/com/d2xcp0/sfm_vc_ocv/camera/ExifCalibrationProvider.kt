@@ -7,7 +7,6 @@ import android.util.Size
 import androidx.exifinterface.media.ExifInterface
 import org.opencv.core.CvType
 import org.opencv.core.Mat
-import kotlin.math.sqrt
 
 // K becslese a kep EXIF adataibol (35mm-ekvivalens fokusztavolsag).
 // Akkor kell, ha a keszulek nem adja meg a LENS_INTRINSIC_CALIBRATION-t,
@@ -17,9 +16,7 @@ object ExifCalibrationProvider {
 
     private const val TAG = "ExifCalibProvider"
 
-    // 35mm film atloja (36x24 mm), az ekvivalens fokusz erre vonatkozik
-    private const val FILM_DIAGONAL_MM = 43.2666
-
+    // A kepletet (f35 / 43,27 * kepatlo) a CalibrationMath.intrinsicsFromExif tartalmazza
     fun loadFromImage(
         context: Context,
         uri: Uri,
@@ -34,16 +31,14 @@ object ExifCalibrationProvider {
             throw IllegalStateException("EXIF FocalLengthIn35mmFilm missing: $uri")
         }
 
-        val diagPx = sqrt(
-            targetWidth.toDouble() * targetWidth + targetHeight.toDouble() * targetHeight
-        )
-        val f = f35 / FILM_DIAGONAL_MM * diagPx
+        val (fx, fy, cx, cy) = CalibrationMath.intrinsicsFromExif(f35, targetWidth, targetHeight)
+        val f = fx
 
         val K = Mat.eye(3, 3, CvType.CV_64F)
-        K.put(0, 0, f)
-        K.put(1, 1, f)
-        K.put(0, 2, targetWidth / 2.0)
-        K.put(1, 2, targetHeight / 2.0)
+        K.put(0, 0, fx)
+        K.put(1, 1, fy)
+        K.put(0, 2, cx)
+        K.put(1, 2, cy)
 
         val D = Mat.zeros(1, 5, CvType.CV_64F)
 

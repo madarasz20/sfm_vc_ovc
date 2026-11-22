@@ -88,15 +88,11 @@ object Camera2CalibrationProvider {
         K.put(2, 1, 0.0)
         K.put(2, 2, 1.0)
 
-        // Android LENS_DISTORTION sorrend: [k1, k2, k3, p1, p2]
-        // OpenCV sorrend:                  [k1, k2, p1, p2, k3]
-        val D = if (distortion != null && distortion.size >= 5) {
+        // Android [k1, k2, k3, p1, p2] → OpenCV [k1, k2, p1, p2, k3] (CalibrationMath)
+        val opencvD = distortion?.let { CalibrationMath.androidToOpenCvDistortion(it) }
+        val D = if (opencvD != null) {
             val d = Mat.zeros(1, 5, CvType.CV_64F)
-            d.put(0, 0, distortion[0].toDouble()) // k1
-            d.put(0, 1, distortion[1].toDouble()) // k2
-            d.put(0, 2, distortion[3].toDouble()) // p1
-            d.put(0, 3, distortion[4].toDouble()) // p2
-            d.put(0, 4, distortion[2].toDouble()) // k3
+            for (i in opencvD.indices) d.put(0, i, opencvD[i])
             d
         } else {
             Log.w(TAG, "LENS_DISTORTION unavailable; using zero distortion")
