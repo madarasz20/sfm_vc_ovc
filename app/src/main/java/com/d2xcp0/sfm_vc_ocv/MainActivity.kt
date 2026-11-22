@@ -33,6 +33,7 @@ import com.d2xcp0.sfm_vc_ocv.pointcloud.PointCloudExporter
 import com.d2xcp0.sfm_vc_ocv.pointcloud.PointCloudHolder
 import com.d2xcp0.sfm_vc_ocv.helper.TrackTriangulator
 import com.d2xcp0.sfm_vc_ocv.helper.SfmRunLog
+import com.d2xcp0.sfm_vc_ocv.helper.KeypointUndistortion
 import org.opencv.android.OpenCVLoader
 import org.opencv.core.Mat
 import org.opencv.imgcodecs.Imgcodecs
@@ -292,7 +293,7 @@ class MainActivity : AppCompatActivity() {
                 Log.i("SfM", "Extracting features for all frames...")
                 val allFeatures = imgs.map { img ->
                     val (kp, desc) = extractor.compute(img)
-                    if (hasDistortion) undistortKeypoints(kp, K, Draw) to desc else kp to desc
+                    if (hasDistortion) KeypointUndistortion.undistortKeypoints(kp, K, Draw) to desc else kp to desc
                 }
                 Log.i("SfM", "Keypoints undistorted: $hasDistortion")
                 runLog.step("extraction")
@@ -1223,21 +1224,6 @@ class MainActivity : AppCompatActivity() {
         val kept = points.indices.filter { meanDists[it] < threshold }
         Log.i("SfM", "Outlier removal: ${points.size} → ${kept.size} points")
         return kept
-    }
-
-    // Kulcspontok torzitasmentesitese pixel koordinatakban (P = K).
-    // A sorrend (es igy a descriptor indexek) nem valtozik.
-    private fun undistortKeypoints(kps: MatOfKeyPoint, K: Mat, D: Mat): MatOfKeyPoint {
-        val arr = kps.toArray()
-        if (arr.isEmpty()) return kps
-
-        val src = MatOfPoint2f(*arr.map { it.pt }.toTypedArray())
-        val dst = MatOfPoint2f()
-        Calib3d.undistortPoints(src, dst, K, D, Mat(), K)
-
-        val pts = dst.toArray()
-        for (i in arr.indices) arr[i].pt = pts[i]
-        return MatOfKeyPoint(*arr)
     }
 
     // PoseEstimator hiba eseten t = 0 vektort ad vissza (identity fallback)
