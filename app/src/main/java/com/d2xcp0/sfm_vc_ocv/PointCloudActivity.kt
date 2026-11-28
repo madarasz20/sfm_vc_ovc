@@ -13,6 +13,15 @@ class PointCloudActivity : AppCompatActivity() {
 
         glView = PointCloudGLSurfaceView(this)
         setContentView(glView)
+
+        // Vissza nyil az ActionBaron (cim: "Point Cloud Viewer", a manifestbol)
+        supportActionBar?.setDisplayHomeAsUpEnabled(true)
+    }
+
+    // A vissza nyil ugyanazt teszi, mint a rendszer vissza gombja: vissza a fokepernyore
+    override fun onSupportNavigateUp(): Boolean {
+        finish()
+        return true
     }
 
     override fun onPause() {

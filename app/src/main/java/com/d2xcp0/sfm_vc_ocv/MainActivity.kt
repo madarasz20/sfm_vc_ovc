@@ -9,6 +9,12 @@ import android.os.Bundle
 import android.provider.MediaStore
 import android.widget.Toast
 import androidx.activity.compose.setContent
+import androidx.activity.SystemBarStyle
+import androidx.activity.enableEdgeToEdge
+import androidx.compose.ui.graphics.toArgb
+import com.d2xcp0.sfm_vc_ocv.ui.theme.Beige
+import com.d2xcp0.sfm_vc_ocv.ui.theme.BeigeDark
+import com.d2xcp0.sfm_vc_ocv.ui.theme.Sfm_vcTheme
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.runtime.*
@@ -96,11 +102,18 @@ class MainActivity : AppCompatActivity() {
         else
             Log.e("OpenCV", "OpenCV FAILED!")
 
+        // A fejlec (TopAppBar) a rendszersavok moge rajzol; sotet ikonok a vilagos sav szinein
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.light(BeigeDark.toArgb(), BeigeDark.toArgb()),
+            navigationBarStyle = SystemBarStyle.light(Beige.toArgb(), Beige.toArgb())
+        )
+
         setContent {
             var showGallery by remember { mutableStateOf(false) }
             var showDebug   by remember { mutableStateOf(false) }
             var showCamera by remember { mutableStateOf(false) }
 
+            Sfm_vcTheme {
             when {
                 showCamera -> {
                     CameraPreviewScreen(
@@ -152,6 +165,7 @@ class MainActivity : AppCompatActivity() {
                         onLoadTestImages = {loadTestImages()}
                     )
                 }
+            }
             }
         }
 
@@ -328,6 +342,8 @@ class MainActivity : AppCompatActivity() {
                 val useIncrementalBA = true
                 var incrementalCloud: List<Point3>? = null
                 var incrementalColors: List<FloatArray>? = null
+                // a toasthoz: az inkrementalis vegso BA RMS-e (ugyanaz, mint SFM_SUMMARY final_rms_px)
+                var incrementalFinalRms: Double? = null
                 // parok relativ pozai az init par valasztasahoz: i -> (R, t, inlierek, rel. szog)
                 data class PairPose(val R: Mat, val t: Mat, val inliers: Int, val angle: Double)
                 val pairPoses = mutableMapOf<Int, PairPose>()
@@ -620,6 +636,7 @@ class MainActivity : AppCompatActivity() {
                     )
                     runLog.set("points_reconstructed", incremental.points.size)
                     runLog.set("final_rms_px", incremental.finalBA?.let { "%.3f".format(it.finalRms) })
+                    incrementalFinalRms = incremental.finalBA?.finalRms
 
                     // A pozokat frame index szerint taroljuk; nem regisztralt frame = ures Mat,
                     // ezt a TrackTriangulator es a reprojekcios hiba szamitas kihagyja
@@ -901,13 +918,13 @@ class MainActivity : AppCompatActivity() {
                 runLog.set("points_displayed", normalized.size)
                 runLog.finish("ok")
 
+                // Inkrementalis modban a vegso BA RMS-e, a regi BA agban a baResult hibaja;
+                // ha egyik sincs, a sor kimarad ("null" helyett)
+                val toastReprojError = if (useIncremental) incrementalFinalRms else baResult?.finalReprojError
+                val toastText = "SfM complete: ${normalized.size} points" +
+                        (toastReprojError?.let { "\nReprojection error: ${"%.2f".format(it)}px" } ?: "")
                 runOnUiThread {
-                    Toast.makeText(
-                        this,
-                        "SfM complete: ${normalized.size} points\n" +
-                                "Reprojection error: ${"%.2f".format(baResult?.finalReprojError)}px",
-                        Toast.LENGTH_LONG
-                    ).show()
+                    Toast.makeText(this, toastText, Toast.LENGTH_LONG).show()
                 }
 
 

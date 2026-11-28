@@ -1,17 +1,18 @@
 package com.d2xcp0.sfm_vc_ocv.screens
 
-
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Alignment.Companion.CenterStart
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.graphics.Color
+import com.d2xcp0.sfm_vc_ocv.R
 
 @Composable
 fun MainScreen(
@@ -26,103 +27,58 @@ fun MainScreen(
     onLoadSession: () -> Unit,
     onLoadTestImages: () -> Unit
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.Start
-    ) {
+    Scaffold(
+        topBar = { AppTopBar(title = stringResource(R.string.app_name)) }
+    ) { padding ->
+        // Gorgetheto, hogy kis kijelzon se loghasson ki semmi
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            SectionTitle("Pictures")
+            MainButton("Open Camera", onOpenCamera)
+            MainButton("Open Gallery", onOpenGallery)
+            MainButton("Clear Gallery", onClearGallery)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                MainButton("Save Session", onSaveSession, Modifier.weight(1f))
+                MainButton("Load Session", onLoadSession, Modifier.weight(1f))
+            }
+            // assets/test_images: a beepitett S1 tesztsorozat (F1 teszt, ablacios meresek)
+            MainButton("Load Test Images", onLoadTestImages)
 
-        Button(onClick = onOpenCamera,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = Color.LightGray,
-                contentColor = Color.Black
-            )
+            SectionTitle("Reconstruction")
+            MainButton("Run SfM", onRunSfM)
+            MainButton("View Reconstruction", onShowSfMResult)
+            MainButton("Export Point Cloud", onExportPointCloud)
 
-        ) { Text("Open Camera")}
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Button(onClick = onOpenGallery,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = Color.LightGray,
-                contentColor = Color.Black
-            )
-
-        ) { Text("Open Gallery") }
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Button(onClick = onClearGallery,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = Color.LightGray,
-                contentColor = Color.Black
-            )
-
-        ) { Text("Clear Gallery") }
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Button(onClick = onRunSfM,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = Color.LightGray,
-                contentColor = Color.Black
-            )
-
-        ) { Text("Run SfM") }
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Button(onClick = onShowSfMResult,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = Color.LightGray,
-                contentColor = Color.Black
-            )
-
-        ) { Text("View Reconstruction") }
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Button(onClick = onOpenDebug,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = Color.LightGray,
-                contentColor = Color.Black
-            )
-
-        ) { Text("Show Debug Matches") }
-        Spacer(Modifier.height(16.dp))
-
-        Button(onClick = onExportPointCloud,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = Color.LightGray,
-                contentColor = Color.Black
-            )
-
-        ) { Text("Export Point Cloud") }
-        Spacer(Modifier.height(16.dp))
-
-        Button(onClick = onSaveSession,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = Color.LightGray,
-                contentColor = Color.Black
-            )
-
-        ) {Text("Save Session")}
-        Spacer(Modifier.height(16.dp))
-
-        Button(onClick = onLoadSession,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = Color.LightGray,
-                contentColor = Color.Black
-            )
-
-        ) {Text("Load Session")}
-        Spacer(Modifier.height(16.dp))
-
-        // ideiglenes: assets/test_images kepei teszteleshez
-        Button(onClick = onLoadTestImages,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = Color.LightGray,
-                contentColor = Color.Black
-            )
-
-        ) {Text("Load Test Images")}
-
+            SectionTitle("Helper")
+            MainButton("Show Debug Matches", onOpenDebug)
+        }
     }
+}
+
+@Composable
+private fun SectionTitle(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.padding(top = 12.dp)
+    )
+}
+
+@Composable
+private fun MainButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier.fillMaxWidth()
+) {
+    Button(onClick = onClick, modifier = modifier) { Text(text) }
 }

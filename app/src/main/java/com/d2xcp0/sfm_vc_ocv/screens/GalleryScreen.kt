@@ -1,8 +1,8 @@
 package com.d2xcp0.sfm_vc_ocv.screens
 
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -10,22 +10,17 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.compose.runtime.Composable
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import coil.transform.Transformation
 import android.graphics.Bitmap
 import android.graphics.Matrix
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.tooling.preview.Preview
 
 // Display-only rotation — does not affect SfM pipeline
 class RotateTransformation(private val degrees: Float) : Transformation {
@@ -45,6 +40,11 @@ fun GalleryScreen(
     val context = LocalContext.current
     var selectedImage by remember { mutableStateOf<Uri?>(null) }
 
+    // Rendszer vissza: teljes kepernyos kepbol a racsra, a racsbol a fokepernyore
+    BackHandler {
+        if (selectedImage != null) selectedImage = null else onBack()
+    }
+
     if (selectedImage != null) {
         FullscreenImage(
             uri = selectedImage!!,
@@ -52,22 +52,7 @@ fun GalleryScreen(
         )
     } else {
         Scaffold(
-            topBar = {
-                TopAppBar(
-                    title = { Text("Gallery") },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = Color.LightGray,
-                        titleContentColor = Color.Black,
-                        navigationIconContentColor = Color.Black,
-                        actionIconContentColor = Color.Black
-                    ),
-                    navigationIcon = {
-                        IconButton(onClick = onBack) {
-                            Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
-                        }
-                    }
-                )
-            }
+            topBar = { AppTopBar(title = "Gallery", onBack = onBack) }
         ) { paddingValues ->
             LazyVerticalGrid(
                 columns = GridCells.Fixed(3),

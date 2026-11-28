@@ -1,8 +1,8 @@
 package com.d2xcp0.sfm_vc_ocv.screens
 
 import android.graphics.Bitmap
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.*
@@ -12,9 +12,6 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.unit.dp
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.ui.graphics.Color
 import java.io.File
 
 private fun loadRotated(file: File): Bitmap? {
@@ -28,31 +25,23 @@ fun DebugGalleryScreen(
     onBack: () -> Unit,
     onClearDebug: () -> Unit
 ) {
+    // A rendszer vissza gombja/gesztusa a fokepernyore visz
+    BackHandler(onBack = onBack)
+
     Scaffold(
         topBar = {
-            TopAppBar(title = { Text("Debug Match Images") },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color.LightGray,
-                    titleContentColor = Color.Black,
-                    navigationIconContentColor = Color.Black,
-                    actionIconContentColor = Color.Black
-                ),
-                navigationIcon = {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
-                }
-
-            },
+            AppTopBar(
+                title = "Debug Match Images",
+                onBack = onBack,
                 actions = {
-                    Button(onClick = onClearDebug,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color.Gray,
-                            contentColor = Color.Black
-                        )) {
+                    Button(
+                        onClick = onClearDebug,
+                        modifier = Modifier.padding(end = 8.dp)
+                    ) {
                         Text("Clear All")
-
                     }
-                })
+                }
+            )
         }
     ) { padding ->
         LazyColumn(

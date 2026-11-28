@@ -2,13 +2,13 @@ package com.d2xcp0.sfm_vc_ocv.screens
 
 import android.net.Uri
 import android.view.TextureView
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -31,33 +31,27 @@ fun CameraPreviewScreen(
         }
     }
 
-    Column(
-        modifier = Modifier.fillMaxSize()
-    ) {
-        AndroidView(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth(),
-            factory = { ctx ->
-                TextureView(ctx).also { textureView ->
-                    cameraManager.startCamera(textureView)
-                }
-            }
-        )
+    // A rendszer vissza gombja/gesztusa a fokepernyore visz
+    BackHandler(onBack = onBack)
 
-        Row(
+    Scaffold(
+        topBar = { AppTopBar(title = "Camera", onBack = onBack) }
+    ) { padding ->
+        Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween
+                .fillMaxSize()
+                .padding(padding)
         ) {
-            Button(onClick = onBack,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color.LightGray,
-                    contentColor = Color.Black
-                )) {
-                Text("Back")
-            }
+            AndroidView(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                factory = { ctx ->
+                    TextureView(ctx).also { textureView ->
+                        cameraManager.startCamera(textureView)
+                    }
+                }
+            )
 
             Button(
                 onClick = {
@@ -65,10 +59,9 @@ fun CameraPreviewScreen(
                         onPhotoCaptured(uri)
                     }
                 },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color.LightGray,
-                    contentColor = Color.Black
-                )
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
             ) {
                 Text("Capture")
             }
